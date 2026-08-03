@@ -1,0 +1,11 @@
+ragnarok-backend/
+  ├── app/
+  │     ├── main.py
+  │     ├── auth/
+  │     ├── runs/
+  │     ├── items/
+  │     ├── participants/
+  │     ├── discord/
+  │     └── raidhelper/
+  ├── requirements.txt
+  └── README.md
