@@ -4,4 +4,4 @@ router = APIRouter()
 
 @router.get("/test")
 def test():
-    return {"raudhelper": "ok"}
+    return {"raidhelper": "ok"}
