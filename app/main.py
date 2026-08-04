@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
@@ -11,28 +12,15 @@ from app.participants.router import router as participants_router
 from app.discord.router import router as discord_router
 from app.raidhelper.router import router as raidhelper_router
 
-app = FastAPI(title="Eventseller Backend")
-
-# 1. CORS erlauben (Damit Vercel auf das Railway-Backend zugreifen darf)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Später auf deine Vercel-Domain einschränken
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# 2. Datenbank-Verbindungsfunktion
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
-# 3. Tabellen-Erstellung beim Start
 def init_db():
     """Erstellt die Tabellen automatisch beim Start der App, falls sie noch nicht existieren."""
     if not DATABASE_URL:
-        print("⚠️ Keine DATABASE_URL gefunden. Überspringe Datenbank-Initialisierung.")
+        print("⚠️ Keine DATABASE_URL gefunden. Überspringe Datenbank-Initialisierung.", flush=True)
         return
         
     try:
@@ -82,14 +70,26 @@ def init_db():
         conn.commit()
         cur.close()
         conn.close()
-        print("✅ Datenbank-Tabellen erfolgreich geprüft/erstellt!")
+        print("✅ Datenbank-Tabellen erfolgreich geprüft/erstellt!", flush=True)
     except Exception as e:
-        print(f"❌ Fehler bei der Datenbank-Initialisierung: {e}")
+        print(f"❌ Fehler bei der Datenbank-Initialisierung: {e}", flush=True)
 
-# Tabellen beim Startup von FastAPI laden
-@app.on_event("startup")
-def startup_event():
+# Modernes Lifespan-Event für FastAPI
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     init_db()
+    yield
+
+app = FastAPI(title="Eventseller Backend", lifespan=lifespan)
+
+# CORS erlauben
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Router einbinden
 app.include_router(auth_router, prefix="/auth")
