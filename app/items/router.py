@@ -12,6 +12,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 class ItemCreate(BaseModel):
     name: str
     default_price: int = 0
+    ro_item_id: int | None = None  # Z.B. 985 für Elunium (optional)
 
 # --- ITEM ANLEGEN (POST) ---
 @router.post("/")
@@ -24,8 +25,8 @@ def create_item(item: ItemCreate):
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO items (name, default_price) VALUES (%s, %s) RETURNING *;",
-            (item.name, item.default_price)
+            "INSERT INTO items (name, default_price, ro_item_id) VALUES (%s, %s, %s) RETURNING *;",
+            (item.name, item.default_price, item.ro_item_id)
         )
         new_item = cur.fetchone()
         conn.commit()
