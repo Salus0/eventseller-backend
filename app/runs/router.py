@@ -12,6 +12,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 class RunCreate(BaseModel):
     name: str
 
+class RunStatusUpdate(BaseModel):
+    status: str  # z. B. 'open', 'closed', 'completed'
+
 class SaleCreate(BaseModel):
     item_id: int
     quantity: int = 1
@@ -20,6 +23,9 @@ class SaleCreate(BaseModel):
 
 class RunParticipantAdd(BaseModel):
     participant_id: int
+
+class PayoutStatusUpdate(BaseModel):
+    is_paid: bool
 
 # --- RUN ERSTELLEN (POST) ---
 @router.post("/")
@@ -53,6 +59,26 @@ def get_runs():
         return runs
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
+
+# --- RUN LÖSCHEN (DELETE) ---
+@router.delete("/{run_id}")
+def delete_run(run_id: int):
+    """Löscht einen Run inklusive aller zugehörigen Verkäufe und Teilnehmer-Verknüpfungen"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM runs WHERE id = %s RETURNING *;", (run_id,))
+        deleted_run = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        if not deleted_run:
+            raise HTTPException(status_code=404, detail="Run nicht gefunden")
+        return {"message": f"Run '{deleted_run['name']}' erfolgreich gelöscht"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Löschen: {str(e)}")
 
 # --- VERKAUF ZU RUN HINZUFÜGEN (POST) ---
 @router.post("/{run_id}/sales")
@@ -102,10 +128,29 @@ def get_run_sales(run_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
 
+# --- EINZELNEN VERKAUF LÖSCHEN (DELETE) ---
+@router.delete("/sales/{sale_id}")
+def delete_sale(sale_id: int):
+    """Entfernt einen einzelnen Verkaufs-Eintrag"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM sales WHERE id = %s RETURNING *;", (sale_id,))
+        deleted_sale = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        if not deleted_sale:
+            raise HTTPException(status_code=404, detail="Verkauf nicht gefunden")
+        return {"message": "Verkauf erfolgreich entfernt"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Löschen: {str(e)}")
+
 # --- TEILNEHMER ZUM RUN HINZUFÜGEN (POST) ---
 @router.post("/{run_id}/participants")
 def add_participant_to_run(run_id: int, entry: RunParticipantAdd):
-    """Verknüpft einen bestehenden Teilnehmer mit diesem Run"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
@@ -121,12 +166,12 @@ def add_participant_to_run(run_id: int, entry: RunParticipantAdd):
         conn.close()
         return res
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Fehler beim Hinzufügen des Teilnehmers: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Fehler beim Hinzufügen: {str(e)}")
 
 # --- TEILNEHMER EINES RUNS ABFRAGEN (GET) ---
 @router.get("/{run_id}/participants")
 def get_run_participants(run_id: int):
-    """Lädt alle Spieler, die an diesem Run teilgenommen haben"""
+    """Lädt alle Spieler inklusive ihres Auszahlungs-Status (is_paid)"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
@@ -134,7 +179,8 @@ def get_run_participants(run_id: int):
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT p.* FROM run_participants rp
+            SELECT p.id as participant_id, p.name, rp.is_paid
+            FROM run_participants rp
             JOIN participants p ON rp.participant_id = p.id
             WHERE rp.run_id = %s;
             """,
@@ -147,25 +193,56 @@ def get_run_participants(run_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden: {str(e)}")
 
+# --- AUSZAHLUNGS-STATUS EINES SPIELERS ÄNDERN (PUT) ---
+@router.put("/{run_id}/participants/{participant_id}/payout")
+def update_payout_status(run_id: int, participant_id: int, status: PayoutStatusUpdate):
+    """Markiert, ob ein Spieler für diesen Run bereits ausgezahlt wurde"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE run_participants
+            SET is_paid = %s
+            WHERE run_id = %s AND participant_id = %s
+            RETURNING *;
+            """,
+            (status.is_paid, run_id, participant_id)
+        )
+        updated_entry = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        if not updated_entry:
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        return updated_entry
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren des Payouts: {str(e)}")
+
 # --- ZENY-SPLIT & ZUSAMMENFASSUNG BERECHNEN (GET) ---
 @router.get("/{run_id}/summary")
 def get_run_summary(run_id: int):
-    """Berechnet Gesamteinnahmen, Teilnehmerzahl und Zeny-Payout pro Spieler"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         
-        # 1. Gesamteinnahmen berechnen
+        # 1. Gesamteinnahmen
         cur.execute("SELECT COALESCE(SUM(quantity * actual_price), 0) as total_zeny FROM sales WHERE run_id = %s;", (run_id,))
         total_zeny = cur.fetchone()["total_zeny"]
         
-        # 2. Anzahl Teilnehmer ermitteln
+        # 2. Anzahl Teilnehmer
         cur.execute("SELECT COUNT(*) as count FROM run_participants WHERE run_id = %s;", (run_id,))
         participant_count = cur.fetchone()["count"]
         
-        # 3. Cut pro Spieler berechnen
+        # 3. Bereits ausgezahlte Teilnehmer
+        cur.execute("SELECT COUNT(*) as paid_count FROM run_participants WHERE run_id = %s AND is_paid = TRUE;", (run_id,))
+        paid_count = cur.fetchone()["paid_count"]
+        
+        # 4. Cut pro Spieler
         payout_per_player = int(total_zeny / participant_count) if participant_count > 0 else 0
         
         cur.close()
@@ -175,7 +252,9 @@ def get_run_summary(run_id: int):
             "run_id": run_id,
             "total_zeny": total_zeny,
             "participant_count": participant_count,
-            "payout_per_player": payout_per_player
+            "payout_per_player": payout_per_player,
+            "participants_paid": paid_count,
+            "all_paid_out": participant_count > 0 and participant_count == paid_count
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler bei der Berechnung: {str(e)}")
