@@ -1,5 +1,4 @@
 import os
-from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
@@ -12,19 +11,27 @@ from app.participants.router import router as participants_router
 from app.discord.router import router as discord_router
 from app.raidhelper.router import router as raidhelper_router
 
+app = FastAPI(title="Eventseller Backend")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-def get_db_connection():
-    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-
-def init_db():
-    """Erstellt die Tabellen automatisch beim Start der App, falls sie noch nicht existieren."""
+# --- MAGISCHER TEST-ENDPUNKT ---
+@app.get("/init-db")
+def force_init_db():
+    """Erstellt die Tabellen manuell über den Aufruf im Browser"""
     if not DATABASE_URL:
-        print("⚠️ Keine DATABASE_URL gefunden. Überspringe Datenbank-Initialisierung.", flush=True)
-        return
+        return {"status": "Fehler", "details": "DATABASE_URL Umgebungsvariable fehlt!"}
         
     try:
-        conn = get_db_connection()
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         
         cur.execute("""
@@ -70,28 +77,12 @@ def init_db():
         conn.commit()
         cur.close()
         conn.close()
-        print("✅ Datenbank-Tabellen erfolgreich geprüft/erstellt!", flush=True)
+        return {"status": "Erfolg", "message": "Alle Tabellen wurden erfolgreich in PostgreSQL angelegt!"}
     except Exception as e:
-        print(f"❌ Fehler bei der Datenbank-Initialisierung: {e}", flush=True)
+        return {"status": "Fehler", "details": str(e)}
 
-# Modernes Lifespan-Event für FastAPI
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    yield
 
-app = FastAPI(title="Eventseller Backend", lifespan=lifespan)
-
-# CORS erlauben
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Router einbinden
+# Standard-Router einbinden
 app.include_router(auth_router, prefix="/auth")
 app.include_router(runs_router, prefix="/runs")
 app.include_router(items_router, prefix="/items")
