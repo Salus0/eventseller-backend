@@ -32,9 +32,9 @@ def create_or_update_item(item: ItemCreate):
         
         cur.execute(
             """
-            INSERT INTO items (item_id, name, image_url) 
+            INSERT INTO items (ro_item_id, name, image_url) 
             VALUES (%s, %s, %s)
-            ON CONFLICT (item_id) DO UPDATE 
+            ON CONFLICT (ro_item_id) DO UPDATE 
             SET name = EXCLUDED.name, image_url = EXCLUDED.image_url
             RETURNING *;
             """,
