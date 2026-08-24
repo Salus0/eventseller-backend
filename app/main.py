@@ -86,7 +86,7 @@ def force_init_db():
 # Standard-Router einbinden
 app.include_router(auth_router, prefix="/auth")
 app.include_router(runs_router, prefix="/runs")
-app.include_router(items_router, prefix="/items")
+app.include_router(items_router, prefix="/items", tags=["Items"])
 app.include_router(participants_router, prefix="/participants")
 app.include_router(discord_router, prefix="/discord")
 app.include_router(raidhelper_router, prefix="/raidhelper")
