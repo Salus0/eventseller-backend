@@ -59,19 +59,21 @@ def get_items():
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         
-        # Holt alle Items + den preislich neuesten Verkauf per Subquery/JOIN aus der Verkäufe-Tabelle
+        # Benutzt ro_item_id anstelle von item_id
         query = """
             SELECT 
-                i.item_id,
+                i.id,
+                i.ro_item_id AS item_id,
                 i.name,
                 i.image_url,
+                i.default_price,
                 last_sales.price AS last_price,
                 last_sales.sold_at AS last_sold_at
             FROM items i
             LEFT JOIN LATERAL (
                 SELECT s.price, s.created_at AS sold_at
                 FROM sales s
-                WHERE s.item_id = i.item_id AND s.price IS NOT NULL
+                WHERE (s.item_id = i.ro_item_id OR s.item_id = i.id) AND s.price IS NOT NULL
                 ORDER BY s.created_at DESC
                 LIMIT 1
             ) last_sales ON TRUE
@@ -83,6 +85,7 @@ def get_items():
         conn.close()
         return items
     except Exception as e:
+        print(f"SQL Fehler: {e}")  # Gibt den Fehler im Railway-Log aus
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Items: {str(e)}")
 
 # --- ITEM-HISTORIE / DETAILS ABFRAGEN (GET) ---
@@ -105,10 +108,10 @@ def get_item_history(item_id: int):
                 s.quantity
             FROM sales s
             JOIN runs r ON s.run_id = r.id
-            WHERE s.item_id = %s
+            WHERE s.item_id = %s OR s.item_id = (SELECT id FROM items WHERE ro_item_id = %s LIMIT 1)
             ORDER BY r.created_at DESC;
         """
-        cur.execute(query, (item_id,))
+        cur.execute(query, (item_id, item_id))
         history = cur.fetchall()
         cur.close()
         conn.close()
