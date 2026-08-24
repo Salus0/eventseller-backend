@@ -1,6 +1,7 @@
 import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import List, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -26,6 +27,16 @@ class RunParticipantAdd(BaseModel):
 
 class PayoutStatusUpdate(BaseModel):
     is_paid: bool
+
+# Neue Schemas für Batch-Updates aus dem Frontend
+class ParticipantUpdate(BaseModel):
+    participant_id: int
+    class_name: Optional[str] = "Unbekannt"
+
+class ItemUpdate(BaseModel):
+    name: str
+    quantity: int = 1
+
 
 # --- RUN ERSTELLEN (POST) ---
 @router.post("/")
@@ -79,6 +90,78 @@ def delete_run(run_id: int):
         return {"message": f"Run '{deleted_run['name']}' erfolgreich gelöscht"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Löschen: {str(e)}")
+
+# --- BATCH TEILNEHMER EDITIEREN/SPEICHERN (PUT) ---
+@router.put("/{run_id}/participants")
+def update_run_participants(run_id: int, participants: List[ParticipantUpdate]):
+    """Ersetzt die komplette Teilnehmerliste eines Runs"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+        
+        # 1. Alte Zuordnungen löschen
+        cur.execute("DELETE FROM run_participants WHERE run_id = %s;", (run_id,))
+        
+        # 2. Neue Liste einfügen
+        for p in participants:
+            cur.execute(
+                """
+                INSERT INTO run_participants (run_id, participant_id, class_name)
+                VALUES (%s, %s, %s);
+                """,
+                (run_id, p.participant_id, p.class_name)
+            )
+            
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"message": "Teilnehmer erfolgreich gespeichert"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Speichern der Teilnehmer: {str(e)}")
+
+# --- BATCH ITEMS/DROPS EDITIEREN/SPEICHERN (PUT) ---
+@router.put("/{run_id}/items")
+def update_run_items(run_id: int, items: List[ItemUpdate]):
+    """Ersetzt alle Drops/Items eines Runs"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+        
+        # 1. Alte Drops löschen
+        cur.execute("DELETE FROM run_drops WHERE run_id = %s;", (run_id,))
+        
+        # 2. Neue Items/Drops eintragen
+        for item in items:
+            # Item-ID ermitteln oder neu anlegen, falls noch nicht existent
+            cur.execute(
+                """
+                INSERT INTO items (name) VALUES (%s)
+                ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name
+                RETURNING id;
+                """,
+                (item.name,)
+            )
+            item_id = cur.fetchone()['id']
+
+            # Zu Drop-Tabelle hinzufügen
+            cur.execute(
+                """
+                INSERT INTO run_drops (run_id, item_id, amount)
+                VALUES (%s, %s, %s);
+                """,
+                (run_id, item_id, item.quantity)
+            )
+            
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"message": "Items erfolgreich gespeichert"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Speichern der Items: {str(e)}")
 
 # --- VERKAUF ZU RUN HINZUFÜGEN (POST) ---
 @router.post("/{run_id}/sales")
@@ -179,7 +262,7 @@ def get_run_participants(run_id: int):
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT p.id as participant_id, p.name, rp.is_paid
+            SELECT p.id as participant_id, p.name, rp.is_paid, rp.class_name
             FROM run_participants rp
             JOIN participants p ON rp.participant_id = p.id
             WHERE rp.run_id = %s;
