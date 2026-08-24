@@ -52,3 +52,50 @@ def get_participants():
         return participants
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden: {str(e)}")
+
+# --- SCHEMA FÜR TEILNEHMER-UPDATE ---
+class ParticipantUpdate(BaseModel):
+    name: str
+    discord_id: str | None = None
+
+# --- TEILNEHMER BEARBEITEN (PUT) ---
+@router.put("/{participant_id}")
+def update_participant(participant_id: int, participant: ParticipantUpdate):
+    """Aktualisiert einen bestehenden Teilnehmer in der Datenbank"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+
+        # Prüfen, ob der Teilnehmer existiert
+        cur.execute("SELECT * FROM participants WHERE id = %s;", (participant_id,))
+        existing = cur.fetchone()
+        if not existing:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Teilnehmer nicht gefunden")
+
+        # Update durchführen (discord_id wird beibehalten, falls None übergeben wurde)
+        new_discord_id = participant.discord_id if participant.discord_id is not None else existing['discord_id']
+
+        cur.execute(
+            """
+            UPDATE participants 
+            SET name = %s, discord_id = %s 
+            WHERE id = %s 
+            RETURNING *;
+            """,
+            (participant.name, new_discord_id, participant_id)
+        )
+        updated_participant = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return updated_participant
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren: {str(e)}")
