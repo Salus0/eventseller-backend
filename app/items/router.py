@@ -48,10 +48,10 @@ def create_or_update_item(item: ItemCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern des Items: {str(e)}")
 
-# --- ALLE ITEMS ABFRAGEN INKL. LETZTEM PREIS (GET) ---
+# --- ALLE ITEMS ABFRAGEN (GET) ---
 @router.get("/")
 def get_items():
-    """Holt alle Items aus der Datenbank inklusive des letzten Verkaufspreises"""
+    """Holt alle Items aus der Datenbank"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
@@ -65,17 +65,15 @@ def get_items():
                 i.ro_item_id AS item_id,
                 i.name,
                 i.image_url,
-                i.default_price,
+                COALESCE(i.default_price, 0) AS default_price,
                 last_sales.actual_price AS last_price,
-                last_sales.sold_at AS last_sold_at
+                NULL AS last_sold_at
             FROM items i
             LEFT JOIN LATERAL (
-                SELECT s.actual_price, r.created_at AS sold_at
+                SELECT s.actual_price
                 FROM sales s
-                LEFT JOIN runs r ON s.run_id = r.id
-                WHERE (s.item_id = i.ro_item_id OR s.item_id = i.id) 
-                  AND s.actual_price IS NOT NULL
-                ORDER BY r.created_at DESC, s.id DESC
+                WHERE s.item_id = i.ro_item_id OR s.item_id = i.id
+                ORDER BY s.id DESC
                 LIMIT 1
             ) last_sales ON TRUE
             ORDER BY i.name ASC;
@@ -86,8 +84,8 @@ def get_items():
         conn.close()
         return items
     except Exception as e:
-        print(f"Fehler beim Laden der Items: {e}")
-        raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Items: {str(e)}")
+        print(f"CRITICAL ERROR IN GET /items: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Datenbank-Fehler: {str(e)}")
 
 
 # --- ITEM-HISTORIE / DETAILS ABFRAGEN (GET) ---
