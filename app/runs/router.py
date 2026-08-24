@@ -254,18 +254,21 @@ def add_participant_to_run(run_id: int, entry: RunParticipantAdd):
 # --- TEILNEHMER EINES RUNS ABFRAGEN (GET) ---
 @router.get("/{run_id}/participants")
 def get_run_participants(run_id: int):
+    """Lädt alle Spieler inklusive aller Details aus der Datenbank"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
+        
+        # is_paid direkt abfragen (ohne Referenz auf payout_status)
         cur.execute(
             """
             SELECT 
                 p.id as participant_id, 
                 p.name, 
                 COALESCE(rp.class_name, 'Unbekannt') as class_name,
-                COALESCE(rp.payout_status, FALSE) as is_paid
+                COALESCE(rp.is_paid, FALSE) as is_paid
             FROM run_participants rp
             JOIN participants p ON rp.participant_id = p.id
             WHERE rp.run_id = %s;
@@ -277,7 +280,7 @@ def get_run_participants(run_id: int):
         conn.close()
         return participants
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Fehler beim Laden: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Teilnehmer: {str(e)}")
 
 # --- AUSZAHLUNGS-STATUS EINES SPIELERS ÄNDERN (PUT) ---
 @router.put("/{run_id}/participants/{participant_id}/payout")
