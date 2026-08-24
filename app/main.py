@@ -57,6 +57,7 @@ def force_init_db():
         CREATE TABLE IF NOT EXISTS run_participants (
             run_id INT REFERENCES runs(id) ON DELETE CASCADE,
             participant_id INT REFERENCES participants(id) ON DELETE CASCADE,
+            class_name VARCHAR(50) DEFAULT 'Unbekannt',
             payout_status BOOLEAN DEFAULT FALSE,
             payout_amount BIGINT DEFAULT 0,
             PRIMARY KEY (run_id, participant_id)
