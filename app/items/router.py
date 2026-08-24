@@ -51,7 +51,7 @@ def create_or_update_item(item: ItemCreate):
 # --- ALLE ITEMS ABFRAGEN INKL. LETZTEM PREIS (GET) ---
 @router.get("/")
 def get_items():
-    """Holt alle Items inklusive des aktuellsten Verkaufspreises und Verkaufsdatums"""
+    """Holt alle Items aus der Datenbank inklusive des letzten Verkaufspreises"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
@@ -59,7 +59,6 @@ def get_items():
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         
-        # Benutzt ro_item_id anstelle von item_id
         query = """
             SELECT 
                 i.id,
@@ -67,14 +66,16 @@ def get_items():
                 i.name,
                 i.image_url,
                 i.default_price,
-                last_sales.price AS last_price,
+                last_sales.actual_price AS last_price,
                 last_sales.sold_at AS last_sold_at
             FROM items i
             LEFT JOIN LATERAL (
-                SELECT s.price, s.created_at AS sold_at
+                SELECT s.actual_price, r.created_at AS sold_at
                 FROM sales s
-                WHERE (s.item_id = i.ro_item_id OR s.item_id = i.id) AND s.price IS NOT NULL
-                ORDER BY s.created_at DESC
+                LEFT JOIN runs r ON s.run_id = r.id
+                WHERE (s.item_id = i.ro_item_id OR s.item_id = i.id) 
+                  AND s.actual_price IS NOT NULL
+                ORDER BY r.created_at DESC, s.id DESC
                 LIMIT 1
             ) last_sales ON TRUE
             ORDER BY i.name ASC;
@@ -85,13 +86,14 @@ def get_items():
         conn.close()
         return items
     except Exception as e:
-        print(f"SQL Fehler: {e}")  # Gibt den Fehler im Railway-Log aus
+        print(f"Fehler beim Laden der Items: {e}")
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Items: {str(e)}")
+
 
 # --- ITEM-HISTORIE / DETAILS ABFRAGEN (GET) ---
 @router.get("/{item_id}/history")
 def get_item_history(item_id: int):
-    """Holt alle Runs, in denen das Item verkauft wurde (Preisentwicklung)"""
+    """Holt alle Runs, in denen das Item verkauft wurde"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
@@ -104,8 +106,9 @@ def get_item_history(item_id: int):
                 s.id AS sale_id,
                 r.name AS run_name,
                 r.created_at AS run_date,
-                s.price,
-                s.quantity
+                s.actual_price AS price,
+                s.quantity,
+                s.buyer_name
             FROM sales s
             JOIN runs r ON s.run_id = r.id
             WHERE s.item_id = %s OR s.item_id = (SELECT id FROM items WHERE ro_item_id = %s LIMIT 1)
