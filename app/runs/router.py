@@ -261,16 +261,16 @@ def get_run_participants(run_id: int):
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         
-        # is_paid direkt abfragen (ohne Referenz auf payout_status)
+        # LEFT JOIN verhindert, dass die Liste leer bleibt, falls der Name in 'participants' fehlt
         cur.execute(
             """
             SELECT 
-                p.id as participant_id, 
-                p.name, 
+                rp.participant_id, 
+                COALESCE(p.name, 'Teilnehmer #' || rp.participant_id) as name, 
                 COALESCE(rp.class_name, 'Unbekannt') as class_name,
                 COALESCE(rp.is_paid, FALSE) as is_paid
             FROM run_participants rp
-            JOIN participants p ON rp.participant_id = p.id
+            LEFT JOIN participants p ON rp.participant_id = p.id
             WHERE rp.run_id = %s;
             """,
             (run_id,)
