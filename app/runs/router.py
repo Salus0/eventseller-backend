@@ -254,7 +254,6 @@ def add_participant_to_run(run_id: int, entry: RunParticipantAdd):
 # --- TEILNEHMER EINES RUNS ABFRAGEN (GET) ---
 @router.get("/{run_id}/participants")
 def get_run_participants(run_id: int):
-    """Lädt alle Spieler inklusive ihres Auszahlungs-Status (is_paid)"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
@@ -262,7 +261,11 @@ def get_run_participants(run_id: int):
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT p.id as participant_id, p.name, rp.is_paid, rp.class_name
+            SELECT 
+                p.id as participant_id, 
+                p.name, 
+                COALESCE(rp.class_name, 'Unbekannt') as class_name,
+                COALESCE(rp.payout_status, FALSE) as is_paid
             FROM run_participants rp
             JOIN participants p ON rp.participant_id = p.id
             WHERE rp.run_id = %s;
