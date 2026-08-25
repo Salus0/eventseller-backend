@@ -164,6 +164,35 @@ def update_run_items(run_id: int, items: List[ItemUpdate]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern der Items: {str(e)}")
 
+# --- ITEMS/DROPS EINES RUNS ABFRAGEN (GET) ---
+@router.get("/{run_id}/items")
+def get_run_items(run_id: int):
+    """Lädt alle Drops/Items eines bestimmten Runs aus der Datenbank"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+        
+        cur.execute(
+            """
+            SELECT 
+                rd.item_id,
+                rd.amount as quantity,
+                i.name as item_name
+            FROM run_drops rd
+            LEFT JOIN items i ON rd.item_id = i.id
+            WHERE rd.run_id = %s;
+            """,
+            (run_id,)
+        )
+        items = cur.fetchall()
+        cur.close()
+        conn.close()
+        return items
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Items: {str(e)}")
+
 # --- VERKAUF ZU RUN HINZUFÜGEN (POST) ---
 @router.post("/{run_id}/sales")
 def add_sale_to_run(run_id: int, sale: SaleCreate):
