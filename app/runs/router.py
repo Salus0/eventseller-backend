@@ -20,7 +20,8 @@ class SaleCreate(BaseModel):
     item_id: int
     quantity: int = 1
     actual_price: int
-    buyer_name: str | None = None
+    is_shop: bool = False
+    buyer_name: Optional[str] = None
 
 class RunParticipantAdd(BaseModel):
     participant_id: int
@@ -165,18 +166,35 @@ def update_run_items(run_id: int, items: List[ItemUpdate]):
 
 # --- VERKAUF ZU RUN HINZUFÜGEN (POST) ---
 @router.post("/{run_id}/sales")
-def create_sale(run_id: int, sale: SaleCreate):
+def add_sale_to_run(run_id: int, sale: SaleCreate):
+    """Fügt einem Run einen Item-Verkauf hinzu (inkl. 2% Shop-Abzug-Berechnung)"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+
+    # Berechne den finalen Preis mit 2% Abzug, falls über Shop verkauft
+    final_price = int(round(sale.actual_price * 0.98)) if sale.is_shop else sale.actual_price
+
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
+
+        # Item-Prüfung über ro_item_id
+        cur.execute("SELECT id FROM items WHERE ro_item_id = %s OR id = %s LIMIT 1;", (sale.item_id, sale.item_id))
+        item_row = cur.fetchone()
+        
+        if not item_row:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Item existiert nicht in der Datenbank!")
+
+        # Eintrag in sales-Tabelle speichern
         cur.execute(
             """
-            INSERT INTO sales (run_id, item_id, quantity, actual_price, buyer_name)
-            VALUES (%s, %s, %s, %s, %s) RETURNING *;
+            INSERT INTO sales (run_id, item_id, quantity, actual_price, is_shop, buyer_name)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING *;
             """,
-            (run_id, sale.item_id, sale.quantity, sale.actual_price, sale.buyer_name)
+            (run_id, sale.item_id, sale.quantity, final_price, sale.is_shop, sale.buyer_name)
         )
         new_sale = cur.fetchone()
         conn.commit()
@@ -184,7 +202,7 @@ def create_sale(run_id: int, sale: SaleCreate):
         conn.close()
         return new_sale
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Fehler beim Speichern des Verkaufs: {str(e)}")
 
 # --- VERKÄUFE EINES RUNS ABFRAGEN (GET) ---
 @router.get("/{run_id}/sales")
