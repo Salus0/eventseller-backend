@@ -119,3 +119,52 @@ def get_item_history(item_id: int):
         return history
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Historie: {str(e)}")
+
+# --- SCHEMA FÜR ITEM-UPDATE ---
+class ItemUpdate(BaseModel):
+    item_id: int
+    name: str
+    image_url: str | None = None
+
+# --- ITEM BEARBEITEN (PUT) ---
+@router.put("/{id}")
+def update_item(id: int, item: ItemUpdate):
+    """Aktualisiert die Stammdaten eines Items anhand der internen Daten-ID"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+
+    img_url = item.image_url
+    if not img_url and item.item_id:
+        img_url = f"https://file5s.ratemyserver.net/items/small/{item.item_id}.gif"
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+
+        # Prüfen, ob das Item existiert
+        cur.execute("SELECT * FROM items WHERE id = %s;", (id,))
+        existing = cur.fetchone()
+        if not existing:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Item nicht gefunden")
+
+        cur.execute(
+            """
+            UPDATE items 
+            SET ro_item_id = %s, name = %s, image_url = %s 
+            WHERE id = %s 
+            RETURNING *;
+            """,
+            (item.item_id, item.name, img_url, id)
+        )
+        updated_item = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return updated_item
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren: {str(e)}")
