@@ -24,7 +24,7 @@ def create_or_update_item(item: ItemCreate):
     # Automatische Bild-URL generieren, falls keine angegeben wurde
     img_url = item.image_url
     if not img_url and item.item_id:
-        img_url = f"https://file5s.ratemyserver.net/items/small/{item.item_id}.gif"
+        img_url = item.image_url if item.image_url else f"/items/{item.item_id}.gif"
 
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
