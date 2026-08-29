@@ -18,7 +18,7 @@ async def get_raid_helper_event(event_id: str):
 
     async with httpx.AsyncClient() as client:
         try:
-            # Aktualisiert auf API v4
+            # Offizieller Raid-Helper v4 API Endpunkt
             url = f"https://raid-helper.xyz/api/v4/events/{event_id}"
             response = await client.get(url, headers=headers, timeout=10.0)
             
@@ -28,7 +28,13 @@ async def get_raid_helper_event(event_id: str):
                     detail=f"Raid-Helper v4 Fehler ({response.status_code}): {response.text}"
                 )
                 
-            return response.json()
+            data = response.json()
+            
+            # Optional: Hier stellen wir sicher, dass die Teilnehmer-Liste 
+            # (je nachdem, wie Raid-Helper sie im v4-Format verschachtelt, meist unter .get("signups")) 
+            # durchsuchbar ist oder direkt durchgereicht wird.
+            # Das JSON enthält nun pro Teilnehmer "userId" und "name".
+            return data
             
         except httpx.RequestError as exc:
             raise HTTPException(
