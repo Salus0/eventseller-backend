@@ -10,6 +10,7 @@ from app.items.router import router as items_router
 from app.participants.router import router as participants_router
 from app.discord.router import router as discord_router
 from app.raidhelper.router import router as raidhelper_router
+from app.db import models, schemas
 
 app = FastAPI(title="Eventseller Backend")
 

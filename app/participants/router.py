@@ -77,9 +77,7 @@ def update_participant(participant_id: int, participant: ParticipantUpdate):
             conn.close()
             raise HTTPException(status_code=404, detail="Teilnehmer nicht gefunden")
 
-        # Update durchführen (discord_id wird beibehalten, falls None übergeben wurde)
-        new_discord_id = participant.discord_id if participant.discord_id is not None else existing['discord_id']
-
+        # Update durchführen (discord_id direkt mit dem Wert aus der Anfrage überschreiben)
         cur.execute(
             """
             UPDATE participants 
@@ -87,7 +85,7 @@ def update_participant(participant_id: int, participant: ParticipantUpdate):
             WHERE id = %s 
             RETURNING *;
             """,
-            (participant.name, new_discord_id, participant_id)
+            (participant.name, participant.discord_id, participant_id)
         )
         updated_participant = cur.fetchone()
         conn.commit()
