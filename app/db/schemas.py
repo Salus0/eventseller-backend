@@ -6,8 +6,12 @@ class ParticipantBase(BaseModel):
     name: str
     discord_id: Optional[str] = None
 
-# Schema für das Erstellen und Bearbeiten (POST / PUT)
+# Schema für das Erstellen (POST)
 class ParticipantCreate(ParticipantBase):
+    pass
+
+# Schema für das Bearbeiten (PUT)
+class ParticipantUpdate(ParticipantBase):
     pass
 
 # Schema für die Antwort an das Frontend (GET)
