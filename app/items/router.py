@@ -21,10 +21,9 @@ def create_or_update_item(item: ItemCreate):
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     
-    # Automatische Bild-URL generieren, falls keine angegeben wurde
     img_url = item.image_url
     if not img_url and item.item_id:
-        img_url = item.image_url if item.image_url else f"/items/{item.item_id}.png"
+        img_url = f"/items/{item.item_id}.png"
 
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
@@ -51,7 +50,7 @@ def create_or_update_item(item: ItemCreate):
 # --- ALLE ITEMS ABFRAGEN (GET) ---
 @router.get("/")
 def get_items():
-    """Holt alle Items aus der Datenbank"""
+    """Holt alle Items aus der Datenbank inklusive letztem Verkaufsdatum"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
@@ -59,6 +58,7 @@ def get_items():
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         
+        # Geändert: Holt jetzt auch s.sold_at für die Haupttabelle
         query = """
             SELECT 
                 i.id,
@@ -67,13 +67,13 @@ def get_items():
                 i.image_url,
                 COALESCE(i.default_price, 0) AS default_price,
                 last_sales.actual_price AS last_price,
-                NULL AS last_sold_at
+                last_sales.sold_at AS last_sold_at
             FROM items i
             LEFT JOIN LATERAL (
-                SELECT s.actual_price
+                SELECT s.actual_price, s.sold_at
                 FROM sales s
                 WHERE s.item_id = i.ro_item_id OR s.item_id = i.id
-                ORDER BY s.id DESC
+                ORDER BY s.sold_at DESC NULLS LAST, s.id DESC
                 LIMIT 1
             ) last_sales ON TRUE
             ORDER BY i.name ASC;
@@ -87,7 +87,6 @@ def get_items():
         print(f"CRITICAL ERROR IN GET /items: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Datenbank-Fehler: {str(e)}")
 
-
 # --- ITEM-HISTORIE / DETAILS ABFRAGEN (GET) ---
 @router.get("/{item_id}/history")
 def get_item_history(item_id: int):
@@ -99,6 +98,7 @@ def get_item_history(item_id: int):
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         
+        # Geändert: s.buyer_name durch s.sold_at ersetzt und danach sortiert
         query = """
             SELECT 
                 s.id AS sale_id,
@@ -106,11 +106,11 @@ def get_item_history(item_id: int):
                 r.created_at AS run_date,
                 s.actual_price AS price,
                 s.quantity,
-                s.buyer_name
+                s.sold_at
             FROM sales s
             JOIN runs r ON s.run_id = r.id
             WHERE s.item_id = %s OR s.item_id = (SELECT id FROM items WHERE ro_item_id = %s LIMIT 1)
-            ORDER BY r.created_at DESC;
+            ORDER BY s.sold_at DESC NULLS LAST, s.id DESC;
         """
         cur.execute(query, (item_id, item_id))
         history = cur.fetchall()
@@ -135,13 +135,12 @@ def update_item(id: int, item: ItemUpdate):
 
     img_url = item.image_url
     if not img_url and item.item_id:
-        img_url = item.image_url if item.image_url else f"/items/{item.item_id}.png"
+        img_url = f"/items/{item.item_id}.png"
 
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
 
-        # Prüfen, ob das Item existiert
         cur.execute("SELECT * FROM items WHERE id = %s;", (id,))
         existing = cur.fetchone()
         if not existing:
