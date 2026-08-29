@@ -21,7 +21,6 @@ class SaleCreate(BaseModel):
     quantity: int = 1
     actual_price: int
     is_shop: bool = False
-    buyer_name: Optional[str] = None
 
 class RunParticipantAdd(BaseModel):
     participant_id: int
@@ -224,11 +223,11 @@ def add_sale_to_run(run_id: int, sale: SaleCreate):
         # 2. Eintrag in sales-Tabelle mit der korrekten Foreign Key ID (item_db_id) speichern
         cur.execute(
             """
-            INSERT INTO sales (run_id, item_id, quantity, actual_price, is_shop, buyer_name)
+            INSERT INTO sales (run_id, item_id, quantity, actual_price, is_shop)
             VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING *;
             """,
-            (run_id, item_db_id, sale.quantity, final_price, sale.is_shop, sale.buyer_name)
+            (run_id, item_db_id, sale.quantity, final_price, sale.is_shop)
         )
         new_sale = cur.fetchone()
         conn.commit()
