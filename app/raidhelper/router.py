@@ -14,7 +14,7 @@ def test():
 async def get_raid_helper_event(event_id: str):
     headers = {}
     if RAID_HELPER_API_KEY:
-        # Falls der Key in Railway ohne Bearer/Key Schema vorliegt:
+        # Raid-Helper v2 unterstützt den API-Key direkt im Authorization Header
         headers["Authorization"] = RAID_HELPER_API_KEY
 
     async with httpx.AsyncClient() as client:
@@ -25,11 +25,11 @@ async def get_raid_helper_event(event_id: str):
                 timeout=10.0
             )
             
-            # Falls Raid-Helper z.B. 401 Unauthorized oder 404 zurückgibt:
+            # Falls Raid-Helper 404, 401 oder 403 meldet, leiten wir die genaue Meldung ans Frontend weiter
             if response.status_code != 200:
                 raise HTTPException(
                     status_code=response.status_code, 
-                    detail=f"Raid-Helper API meldet Status {response.status_code}: {response.text}"
+                    detail=f"Raid-Helper API Fehler ({response.status_code}): {response.text}"
                 )
                 
             return response.json()
