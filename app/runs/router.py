@@ -224,7 +224,7 @@ def add_sale_to_run(run_id: int, sale: SaleCreate):
         cur.execute(
             """
             INSERT INTO sales (run_id, item_id, quantity, actual_price, is_shop)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s)
             RETURNING *;
             """,
             (run_id, item_db_id, sale.quantity, final_price, sale.is_shop)
