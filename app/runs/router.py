@@ -207,23 +207,28 @@ def add_sale_to_run(run_id: int, sale: SaleCreate):
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
 
-        # Item-Prüfung über ro_item_id
+        # 1. Prüfen, ob das Item existiert (über ro_item_id oder id)
         cur.execute("SELECT id FROM items WHERE ro_item_id = %s OR id = %s LIMIT 1;", (sale.item_id, sale.item_id))
         item_row = cur.fetchone()
         
+        # Falls das Item in der items-Tabelle fehlt, legen wir es kurz mit der ro_item_id an
         if not item_row:
-            cur.close()
-            conn.close()
-            raise HTTPException(status_code=404, detail="Item existiert nicht in der Datenbank!")
+            cur.execute(
+                "INSERT INTO items (name, ro_item_id) VALUES (%s, %s) RETURNING id;",
+                (f"Item #{sale.item_id}", sale.item_id)
+            )
+            item_db_id = cur.fetchone()['id']
+        else:
+            item_db_id = item_row['id']
 
-        # Eintrag in sales-Tabelle speichern
+        # 2. Eintrag in sales-Tabelle mit der korrekten Foreign Key ID (item_db_id) speichern
         cur.execute(
             """
             INSERT INTO sales (run_id, item_id, quantity, actual_price, is_shop, buyer_name)
             VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING *;
             """,
-            (run_id, sale.item_id, sale.quantity, final_price, sale.is_shop, sale.buyer_name)
+            (run_id, item_db_id, sale.quantity, final_price, sale.is_shop, sale.buyer_name)
         )
         new_sale = cur.fetchone()
         conn.commit()
