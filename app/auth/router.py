@@ -2,8 +2,10 @@ import os
 import httpx
 import jwt
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException
+from typing import List
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 router = APIRouter()
 
@@ -11,11 +13,73 @@ CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI")
 GUILD_ID = os.getenv("DISCORD_GUILD_ID")
-ADMIN_ROLE_ID = os.getenv("DISCORD_ADMIN_ROLE_ID")
+
+# --- DISCORD ROLLEN EINSTELLUNGEN ---
+# Du kannst hier Komma-getrennte IDs in der Railway Env-Variable speichern 
+# oder die IDs direkt als Liste definieren:
+ADMIN_ROLE_IDS = os.getenv("DISCORD_ADMIN_ROLE_IDS", "1520133746462822480").split(",")
+SELLER_ROLE_IDS = os.getenv("DISCORD_SELLER_ROLE_IDS", "1520149616065122384").split(",")
+MEMBER_ROLE_IDS = os.getenv("DISCORD_MEMBER_ROLE_IDS", "1520141680185970688,1528056559307853916,1529563768244404314,1520144730669711440").split(",")
+
 JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key-change-this")
 JWT_ALGORITHM = "HS256"
 
-# Weiterleitung zum Discord Login
+security = HTTPBearer()
+
+# --- HELFER ZUM PRÜFEN DER ROLLEN IN API-ENDPUNKTEN ---
+
+def get_current_user_payload(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Ungültiger Token. Bitte erneut einloggen."
+        )
+
+def get_current_user_role(payload: dict = Depends(get_current_user_payload)) -> str:
+    user_roles = [str(r) for r in payload.get("roles", [])]
+    
+    # 1. Admin Check
+    if any(r in user_roles for r in ADMIN_ROLE_IDS) or payload.get("role") == "admin":
+        return "admin"
+        
+    # 2. Seller Check
+    if any(r in user_roles for r in SELLER_ROLE_IDS) or payload.get("role") == "seller":
+        return "seller"
+        
+    # 3. Member Check (mehrere Rollen erlaubt)
+    if any(r in user_roles for r in MEMBER_ROLE_IDS) or payload.get("role") == "member":
+        return "member"
+        
+    # Falls der User auf dem Discord ist, aber keine der 3 Rollen hat:
+    raise HTTPException(
+        status_code=403, 
+        detail="Zugriff verweigert: Keine berechtigte Discord-Rolle vorhanden."
+    )
+
+# --- DEPENDENCIES FÜR ROUTEN-SCHUTZ ---
+
+def require_member(role: str = Depends(get_current_user_role)):
+    if role not in ["admin", "seller", "member"]:
+        raise HTTPException(status_code=403, detail="Keine Leseberechtigung")
+    return role
+
+def require_seller(role: str = Depends(get_current_user_role)):
+    if role not in ["admin", "seller"]:
+        raise HTTPException(status_code=403, detail="Mindestens Seller-Rolle erforderlich")
+    return role
+
+def require_admin(role: str = Depends(get_current_user_role)):
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Nur für Admins gestattet")
+    return role
+
+
+# --- AUTH ENDPUNKTE ---
+
 @router.get("/login")
 def discord_login():
     discord_auth_url = (
@@ -27,7 +91,6 @@ def discord_login():
     )
     return RedirectResponse(discord_auth_url)
 
-# Callback nach dem Discord Login
 @router.get("/discord/callback")
 async def discord_callback(code: str):
     token_data = {
@@ -57,21 +120,29 @@ async def discord_callback(code: str):
             headers={"Authorization": f"Bearer {access_token}"}
         )
 
-        role = "guest"
+        role = "unauthorized"
+        user_roles = []
+
         if guild_res.status_code == 200:
             member_data = guild_res.json()
-            user_roles = member_data.get("roles", [])
-            if ADMIN_ROLE_ID in user_roles:
+            user_roles = [str(r) for r in member_data.get("roles", [])]
+
+            # Hierarchie prüfen
+            if any(r in user_roles for r in ADMIN_ROLE_IDS):
                 role = "admin"
-            else:
+            elif any(r in user_roles for r in SELLER_ROLE_IDS):
+                role = "seller"
+            elif any(r in user_roles for r in MEMBER_ROLE_IDS):
                 role = "member"
 
-        # JWT Token erstellen
+        # JWT Token mit allen Discord-Rollen-IDs erstellen
         payload = {
             "sub": user["id"],
+            "discord_id": user["id"],
             "username": user["username"],
             "avatar": user.get("avatar"),
             "role": role,
+            "roles": user_roles,
             "exp": datetime.utcnow() + timedelta(days=7)
         }
         jwt_token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)

@@ -1,9 +1,12 @@
 import os
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
+
+# Auth Dependencies aus der auth.py importieren
+from app.auth.router import require_member, require_seller, require_admin
 
 router = APIRouter()
 
@@ -14,7 +17,7 @@ class RunCreate(BaseModel):
     name: str
 
 class RunStatusUpdate(BaseModel):
-    status: str  # z. B. 'open', 'closed', 'completed'
+    status: str
 
 class SaleCreate(BaseModel):
     item_id: int
@@ -28,7 +31,6 @@ class RunParticipantAdd(BaseModel):
 class PayoutStatusUpdate(BaseModel):
     is_paid: bool
 
-# Neue Schemas für Batch-Updates aus dem Frontend
 class ParticipantUpdate(BaseModel):
     participant_id: int
     class_name: Optional[str] = "Unbekannt"
@@ -38,8 +40,8 @@ class ItemUpdate(BaseModel):
     quantity: int = 1
 
 
-# --- RUN ERSTELLEN (POST) ---
-@router.post("/")
+# --- RUN ERSTELLEN (POST) - Mindestens SELLER ---
+@router.post("/", dependencies=[Depends(require_seller)])
 def create_run(run: RunCreate):
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
@@ -55,8 +57,8 @@ def create_run(run: RunCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
 
-# --- ALLE RUNS ABFRAGEN (GET) ---
-@router.get("/")
+# --- ALLE RUNS ABFRAGEN (GET) - Mindestens MEMBER ---
+@router.get("/", dependencies=[Depends(require_member)])
 def get_runs():
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
@@ -71,10 +73,9 @@ def get_runs():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
 
-# --- RUN LÖSCHEN (DELETE) ---
-@router.delete("/{run_id}")
+# --- RUN LÖSCHEN (DELETE) - Nur ADMIN ---
+@router.delete("/{run_id}", dependencies=[Depends(require_admin)])
 def delete_run(run_id: int):
-    """Löscht einen Run inklusive aller zugehörigen Verkäufe und Teilnehmer-Verknüpfungen"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
@@ -91,20 +92,15 @@ def delete_run(run_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Löschen: {str(e)}")
 
-# --- BATCH TEILNEHMER EDITIEREN/SPEICHERN (PUT) ---
-@router.put("/{run_id}/participants")
+# --- BATCH TEILNEHMER SPEICHERN (PUT) - Mindestens SELLER ---
+@router.put("/{run_id}/participants", dependencies=[Depends(require_seller)])
 def update_run_participants(run_id: int, participants: List[ParticipantUpdate]):
-    """Ersetzt die komplette Teilnehmerliste eines Runs"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        
-        # 1. Alte Zuordnungen löschen
         cur.execute("DELETE FROM run_participants WHERE run_id = %s;", (run_id,))
-        
-        # 2. Neue Liste einfügen
         for p in participants:
             cur.execute(
                 """
@@ -113,7 +109,6 @@ def update_run_participants(run_id: int, participants: List[ParticipantUpdate]):
                 """,
                 (run_id, p.participant_id, p.class_name)
             )
-            
         conn.commit()
         cur.close()
         conn.close()
@@ -121,22 +116,16 @@ def update_run_participants(run_id: int, participants: List[ParticipantUpdate]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern der Teilnehmer: {str(e)}")
 
-# --- BATCH ITEMS/DROPS EDITIEREN/SPEICHERN (PUT) ---
-@router.put("/{run_id}/items")
+# --- BATCH ITEMS SPEICHERN (PUT) - Mindestens SELLER ---
+@router.put("/{run_id}/items", dependencies=[Depends(require_seller)])
 def update_run_items(run_id: int, items: List[ItemUpdate]):
-    """Ersetzt alle Drops/Items eines Runs"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        
-        # 1. Alte Drops löschen
         cur.execute("DELETE FROM run_drops WHERE run_id = %s;", (run_id,))
-        
-        # 2. Neue Items/Drops eintragen
         for item in items:
-            # Item-ID ermitteln oder neu anlegen, falls noch nicht existent
             cur.execute(
                 """
                 INSERT INTO items (name) VALUES (%s)
@@ -146,8 +135,6 @@ def update_run_items(run_id: int, items: List[ItemUpdate]):
                 (item.name,)
             )
             item_id = cur.fetchone()['id']
-
-            # Zu Drop-Tabelle hinzufügen
             cur.execute(
                 """
                 INSERT INTO run_drops (run_id, item_id, amount)
@@ -155,7 +142,6 @@ def update_run_items(run_id: int, items: List[ItemUpdate]):
                 """,
                 (run_id, item_id, item.quantity)
             )
-            
         conn.commit()
         cur.close()
         conn.close()
@@ -163,16 +149,14 @@ def update_run_items(run_id: int, items: List[ItemUpdate]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern der Items: {str(e)}")
 
-# --- ITEMS/DROPS EINES RUNS ABFRAGEN (GET) ---
-@router.get("/{run_id}/items")
+# --- ITEMS/DROPS ABFRAGEN (GET) - Mindestens MEMBER ---
+@router.get("/{run_id}/items", dependencies=[Depends(require_member)])
 def get_run_items(run_id: int):
-    """Lädt alle Drops/Items eines bestimmten Runs aus der Datenbank"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        
         cur.execute(
             """
             SELECT 
@@ -192,25 +176,21 @@ def get_run_items(run_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Items: {str(e)}")
 
-# --- VERKAUF ZU RUN HINZUFÜGEN (POST) ---
-@router.post("/{run_id}/sales")
+# --- VERKAUF HINZUFÜGEN (POST) - Mindestens SELLER ---
+@router.post("/{run_id}/sales", dependencies=[Depends(require_seller)])
 def add_sale_to_run(run_id: int, sale: SaleCreate):
-    """Fügt einem Run einen Item-Verkauf hinzu (inkl. 2% Shop-Abzug-Berechnung)"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
-    # Berechne den finalen Preis mit 2% Abzug, falls über Shop verkauft
     final_price = int(round(sale.actual_price * 0.98)) if sale.is_shop else sale.actual_price
 
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
 
-        # 1. Prüfen, ob das Item existiert (über ro_item_id oder id)
         cur.execute("SELECT id FROM items WHERE ro_item_id = %s OR id = %s LIMIT 1;", (sale.item_id, sale.item_id))
         item_row = cur.fetchone()
         
-        # Falls das Item in der items-Tabelle fehlt, legen wir es kurz mit der ro_item_id an
         if not item_row:
             cur.execute(
                 "INSERT INTO items (name, ro_item_id) VALUES (%s, %s) RETURNING id;",
@@ -220,7 +200,6 @@ def add_sale_to_run(run_id: int, sale: SaleCreate):
         else:
             item_db_id = item_row['id']
 
-        # 2. Eintrag in sales-Tabelle mit der korrekten Foreign Key ID (item_db_id) speichern
         cur.execute(
             """
             INSERT INTO sales (run_id, item_id, quantity, actual_price, is_shop)
@@ -237,8 +216,8 @@ def add_sale_to_run(run_id: int, sale: SaleCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern des Verkaufs: {str(e)}")
 
-# --- VERKÄUFE EINES RUNS ABFRAGEN (GET) ---
-@router.get("/{run_id}/sales")
+# --- VERKÄUFE ABFRAGEN (GET) - Mindestens MEMBER ---
+@router.get("/{run_id}/sales", dependencies=[Depends(require_member)])
 def get_run_sales(run_id: int):
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
@@ -262,10 +241,9 @@ def get_run_sales(run_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
 
-# --- EINZELNEN VERKAUF LÖSCHEN (DELETE) ---
-@router.delete("/sales/{sale_id}")
+# --- VERKAUF LÖSCHEN (DELETE) - Mindestens SELLER ---
+@router.delete("/sales/{sale_id}", dependencies=[Depends(require_seller)])
 def delete_sale(sale_id: int):
-    """Entfernt einen einzelnen Verkaufs-Eintrag"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
@@ -282,8 +260,8 @@ def delete_sale(sale_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Löschen: {str(e)}")
 
-# --- TEILNEHMER ZUM RUN HINZUFÜGEN (POST) ---
-@router.post("/{run_id}/participants")
+# --- TEILNEHMER HINZUFÜGEN (POST) - Mindestens SELLER ---
+@router.post("/{run_id}/participants", dependencies=[Depends(require_seller)])
 def add_participant_to_run(run_id: int, entry: RunParticipantAdd):
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
@@ -302,17 +280,14 @@ def add_participant_to_run(run_id: int, entry: RunParticipantAdd):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Hinzufügen: {str(e)}")
 
-# --- TEILNEHMER EINES RUNS ABFRAGEN (GET) ---
-@router.get("/{run_id}/participants")
+# --- TEILNEHMER ABFRAGEN (GET) - Mindestens MEMBER ---
+@router.get("/{run_id}/participants", dependencies=[Depends(require_member)])
 def get_run_participants(run_id: int):
-    """Lädt alle Spieler inklusive aller Details aus der Datenbank"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        
-        # LEFT JOIN verhindert, dass die Liste leer bleibt, falls der Name in 'participants' fehlt
         cur.execute(
             """
             SELECT 
@@ -333,10 +308,9 @@ def get_run_participants(run_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Teilnehmer: {str(e)}")
 
-# --- AUSZAHLUNGS-STATUS EINES SPIELERS ÄNDERN (PUT) ---
-@router.put("/{run_id}/participants/{participant_id}/payout")
+# --- AUSZAHLUNGS-STATUS ÄNDERN (PUT) - Nur ADMIN ---
+@router.put("/{run_id}/participants/{participant_id}/payout", dependencies=[Depends(require_admin)])
 def update_payout_status(run_id: int, participant_id: int, status: PayoutStatusUpdate):
-    """Markiert, ob ein Spieler für diesen Run bereits ausgezahlt wurde"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     try:
@@ -361,8 +335,8 @@ def update_payout_status(run_id: int, participant_id: int, status: PayoutStatusU
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren des Payouts: {str(e)}")
 
-# --- ZENY-SPLIT & ZUSAMMENFASSUNG BERECHNEN (GET) ---
-@router.get("/{run_id}/summary")
+# --- ZENY-SPLIT BERECHNEN (GET) - Mindestens MEMBER ---
+@router.get("/{run_id}/summary", dependencies=[Depends(require_member)])
 def get_run_summary(run_id: int):
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
@@ -370,19 +344,15 @@ def get_run_summary(run_id: int):
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         
-        # 1. Gesamteinnahmen
         cur.execute("SELECT COALESCE(SUM(quantity * actual_price), 0) as total_zeny FROM sales WHERE run_id = %s;", (run_id,))
         total_zeny = cur.fetchone()["total_zeny"]
         
-        # 2. Anzahl Teilnehmer
         cur.execute("SELECT COUNT(*) as count FROM run_participants WHERE run_id = %s;", (run_id,))
         participant_count = cur.fetchone()["count"]
         
-        # 3. Bereits ausgezahlte Teilnehmer
         cur.execute("SELECT COUNT(*) as paid_count FROM run_participants WHERE run_id = %s AND is_paid = TRUE;", (run_id,))
         paid_count = cur.fetchone()["paid_count"]
         
-        # 4. Cut pro Spieler
         payout_per_player = int(total_zeny / participant_count) if participant_count > 0 else 0
         
         cur.close()

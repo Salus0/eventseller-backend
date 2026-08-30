@@ -10,10 +10,10 @@ from app.items.router import router as items_router
 from app.participants.router import router as participants_router
 from app.discord.router import router as discord_router
 from app.raidhelper.router import router as raidhelper_router
-from app.db import models, schemas
 
 app = FastAPI(title="Eventseller Backend")
 
+# CORS-Middleware aktivieren
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,10 +24,8 @@ app.add_middleware(
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# --- MAGISCHER TEST-ENDPUNKT ---
 @app.get("/init-db")
 def force_init_db():
-    """Erstellt die Tabellen manuell über den Aufruf im Browser"""
     if not DATABASE_URL:
         return {"status": "Fehler", "details": "DATABASE_URL Umgebungsvariable fehlt!"}
         
@@ -45,12 +43,14 @@ def force_init_db():
         CREATE TABLE IF NOT EXISTS items (
             id SERIAL PRIMARY KEY,
             name VARCHAR(100) NOT NULL UNIQUE,
+            ro_item_id INT,
             default_price BIGINT DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS runs (
             id SERIAL PRIMARY KEY,
-            run_type VARCHAR(20) NOT NULL,
+            name VARCHAR(100),
+            run_type VARCHAR(20),
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             status VARCHAR(20) DEFAULT 'Offen'
         );
@@ -59,20 +59,19 @@ def force_init_db():
             run_id INT REFERENCES runs(id) ON DELETE CASCADE,
             participant_id INT REFERENCES participants(id) ON DELETE CASCADE,
             class_name VARCHAR(50) DEFAULT 'Unbekannt',
-            payout_status BOOLEAN DEFAULT FALSE,
+            is_paid BOOLEAN DEFAULT FALSE,
             payout_amount BIGINT DEFAULT 0,
             PRIMARY KEY (run_id, participant_id)
         );
 
-        CREATE TABLE IF NOT EXISTS run_drops (
+        CREATE TABLE IF NOT EXISTS sales (
             id SERIAL PRIMARY KEY,
             run_id INT REFERENCES runs(id) ON DELETE CASCADE,
             item_id INT REFERENCES items(id) ON DELETE CASCADE,
-            amount INT DEFAULT 1,
-            sale_type VARCHAR(20) DEFAULT 'Direkt',
-            sale_price BIGINT DEFAULT 0,
-            net_revenue BIGINT DEFAULT 0,
-            is_sold BOOLEAN DEFAULT FALSE
+            quantity INT DEFAULT 1,
+            actual_price BIGINT DEFAULT 0,
+            is_shop BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
         """)
         
@@ -84,10 +83,10 @@ def force_init_db():
         return {"status": "Fehler", "details": str(e)}
 
 
-# Standard-Router einbinden
+# Router einbinden
 app.include_router(auth_router, prefix="/auth", tags=["Auth"])
-app.include_router(runs_router, prefix="/runs")
+app.include_router(runs_router, prefix="/runs", tags=["Runs"])
 app.include_router(items_router, prefix="/items", tags=["Items"])
-app.include_router(participants_router, prefix="/participants")
-app.include_router(discord_router, prefix="/discord")
-app.include_router(raidhelper_router, prefix="/raidhelper")
+app.include_router(participants_router, prefix="/participants", tags=["Participants"])
+app.include_router(discord_router, prefix="/discord", tags=["Discord"])
+app.include_router(raidhelper_router, prefix="/raidhelper", tags=["RaidHelper"])
