@@ -15,11 +15,10 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # --- SCHEMAS ---
 class RunCreate(BaseModel):
     name: str
-    run_type: Optional[str] = None
+    created_at: Optional[str] = None  # z.B. "2026-07-24 20:15:00"
 
 class RunUpdate(BaseModel):
     name: str
-    run_type: Optional[str] = None
 
 class RunStatusUpdate(BaseModel):
     status: str
@@ -57,10 +56,18 @@ def create_run(run: RunCreate):
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO runs (name, run_type) VALUES (%s, %s) RETURNING *;",
-            (run.name, run.run_type)
-        )
+        
+        if run.created_at:
+            cur.execute(
+                "INSERT INTO runs (name, created_at) VALUES (%s, %s) RETURNING *;",
+                (run.name, run.created_at)
+            )
+        else:
+            cur.execute(
+                "INSERT INTO runs (name) VALUES (%s) RETURNING *;",
+                (run.name,)
+            )
+            
         new_run = cur.fetchone()
         conn.commit()
         cur.close()
@@ -96,11 +103,11 @@ def update_run(run_id: int, run: RunUpdate):
         cur.execute(
             """
             UPDATE runs 
-            SET name = %s, run_type = %s 
+            SET name = %s 
             WHERE id = %s 
             RETURNING *;
             """,
-            (run.name, run.run_type, run_id)
+            (run.name, run_id)
         )
         updated_run = cur.fetchone()
         conn.commit()
