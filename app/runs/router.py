@@ -372,6 +372,7 @@ def get_run_participants(run_id: int):
             SELECT 
                 rp.participant_id, 
                 COALESCE(p.name, 'Teilnehmer #' || rp.participant_id) as name, 
+                p.discord_id,
                 COALESCE(rp.class_name, 'Unbekannt') as class_name,
                 COALESCE(rp.is_paid, FALSE) as is_paid
             FROM run_participants rp
