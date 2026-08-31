@@ -1,5 +1,6 @@
 import os
-from fastapi import APIRouter, HTTPException
+import jwt
+from fastapi import APIRouter, HTTPException, Depends, Header, status
 from pydantic import BaseModel
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -7,6 +8,37 @@ from psycopg2.extras import RealDictCursor
 router = APIRouter()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key-change-this")
+
+# --- AUTH-DEPENDENCIES ---
+
+def get_current_user(authorization: str = Header(None)):
+    """Prüft, ob ein valider JWT-Token übergeben wurde (für alle eingeloggten Nutzer)."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Nicht authentifiziert. Bitte logge dich ein."
+        )
+    
+    token = authorization.split(" ")[1]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return payload
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Ungültiger oder abgelaufener Token."
+        )
+
+def get_current_admin_user(current_user: dict = Depends(get_current_user)):
+    """Stellt sicher, dass der angemeldete Nutzer die Admin-Rolle besitzt."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Keine Berechtigung! Nur Admins dürfen diese Aktion ausführen."
+        )
+    return current_user
+
 
 # --- SCHEMAS ---
 class ItemCreate(BaseModel):
@@ -14,10 +46,19 @@ class ItemCreate(BaseModel):
     name: str             # z.B. Elunium
     image_url: str | None = None  # z.B. https://file5s.ratemyserver.net/items/small/1026.gif
 
-# --- ITEM ANLEGEN ODER UPDATE (POST) ---
+class ItemUpdate(BaseModel):
+    item_id: int
+    name: str
+    image_url: str | None = None
+
+
+# --- ITEM ANLEGEN ODER UPDATE (POST) - Nur für Admins ---
 @router.post("/")
-def create_or_update_item(item: ItemCreate):
-    """Erstellt ein neues Item oder aktualisiert die Stammdaten anhand der item_id"""
+def create_or_update_item(
+    item: ItemCreate,
+    admin_user: dict = Depends(get_current_admin_user)
+):
+    """Erstellt ein neues Item oder aktualisiert die Stammdaten anhand der item_id (Nur Admins)"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
     
@@ -47,10 +88,11 @@ def create_or_update_item(item: ItemCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern des Items: {str(e)}")
 
-# --- ALLE ITEMS ABFRAGEN (GET) ---
+
+# --- ALLE ITEMS ABFRAGEN (GET) - Für alle eingeloggten Nutzer ---
 @router.get("/")
-def get_items():
-    """Holt alle Items aus der Datenbank inklusive letztem Verkaufsdatum"""
+def get_items(current_user: dict = Depends(get_current_user)):
+    """Holt alle Items aus der Datenbank inklusive letztem Verkaufsdatum (Nur angemeldete Nutzer)"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
@@ -58,7 +100,6 @@ def get_items():
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         
-        # Geändert: Holt jetzt auch s.sold_at für die Haupttabelle
         query = """
             SELECT 
                 i.id,
@@ -87,10 +128,14 @@ def get_items():
         print(f"CRITICAL ERROR IN GET /items: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Datenbank-Fehler: {str(e)}")
 
-# --- ITEM-HISTORIE / DETAILS ABFRAGEN (GET) ---
+
+# --- ITEM-HISTORIE / DETAILS ABFRAGEN (GET) - Für alle eingeloggten Nutzer ---
 @router.get("/{item_id}/history")
-def get_item_history(item_id: int):
-    """Holt alle Runs, in denen das Item verkauft wurde"""
+def get_item_history(
+    item_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """Holt alle Runs, in denen das Item verkauft wurde (Nur angemeldete Nutzer)"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
@@ -98,7 +143,6 @@ def get_item_history(item_id: int):
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         
-        # Geändert: s.buyer_name durch s.sold_at ersetzt und danach sortiert
         query = """
             SELECT 
                 s.id AS sale_id,
@@ -120,16 +164,15 @@ def get_item_history(item_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Historie: {str(e)}")
 
-# --- SCHEMA FÜR ITEM-UPDATE ---
-class ItemUpdate(BaseModel):
-    item_id: int
-    name: str
-    image_url: str | None = None
 
-# --- ITEM BEARBEITEN (PUT) ---
+# --- ITEM BEARBEITEN (PUT) - Nur für Admins ---
 @router.put("/{id}")
-def update_item(id: int, item: ItemUpdate):
-    """Aktualisiert die Stammdaten eines Items anhand der internen Daten-ID"""
+def update_item(
+    id: int,
+    item: ItemUpdate,
+    admin_user: dict = Depends(get_current_admin_user)
+):
+    """Aktualisiert die Stammdaten eines Items anhand der internen Daten-ID (Nur Admins)"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
