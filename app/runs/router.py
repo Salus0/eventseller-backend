@@ -39,6 +39,10 @@ class ItemUpdate(BaseModel):
     name: str
     quantity: int = 1
 
+class SaleUpdate(BaseModel):
+    quantity: int = 1
+    actual_price: int
+    is_shop: bool = False
 
 # --- RUN ERSTELLEN (POST) - Mindestens SELLER ---
 @router.post("/", dependencies=[Depends(require_seller)])
@@ -368,3 +372,50 @@ def get_run_summary(run_id: int):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler bei der Berechnung: {str(e)}")
+
+# --- VERKAUF BEARBEITEN (PUT) ---
+@router.put("/sales/{sale_id}")
+def update_sale(
+    sale_id: int, 
+    sale: SaleUpdate, 
+    admin_user: dict = Depends(get_current_admin_user) # bzw. get_current_user, je nachdem wer bearbeiten darf
+):
+    """Aktualisiert Preis, Menge oder Shop-Status eines bestehenden Verkaufs"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+
+    # Berechne den finalen Preis mit 2% Abzug, falls über Shop verkauft
+    final_price = int(round(sale.actual_price * 0.98)) if sale.is_shop else sale.actual_price
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+
+        # Prüfen, ob der Verkauf existiert
+        cur.execute("SELECT id FROM sales WHERE id = %s;", (sale_id,))
+        existing = cur.fetchone()
+        if not existing:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Verkaufseintrag nicht gefunden")
+
+        # Update durchführen
+        cur.execute(
+            """
+            UPDATE sales 
+            SET quantity = %s, actual_price = %s, is_shop = %s, buyer_name = %s 
+            WHERE id = %s 
+            RETURNING *;
+            """,
+            (sale.quantity, final_price, sale.is_shop, sale.buyer_name, sale_id)
+        )
+        updated_sale = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return updated_sale
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren des Verkaufs: {str(e)}")
