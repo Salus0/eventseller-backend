@@ -15,6 +15,11 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # --- SCHEMAS ---
 class RunCreate(BaseModel):
     name: str
+    run_type: Optional[str] = None
+
+class RunUpdate(BaseModel):
+    name: str
+    run_type: Optional[str] = None
 
 class RunStatusUpdate(BaseModel):
     status: str
@@ -52,7 +57,10 @@ def create_run(run: RunCreate):
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        cur.execute("INSERT INTO runs (name) VALUES (%s) RETURNING *;", (run.name,))
+        cur.execute(
+            "INSERT INTO runs (name, run_type) VALUES (%s, %s) RETURNING *;",
+            (run.name, run.run_type)
+        )
         new_run = cur.fetchone()
         conn.commit()
         cur.close()
@@ -76,6 +84,33 @@ def get_runs():
         return runs
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
+
+# --- RUN BEARBEITEN (PUT) - Mindestens SELLER ---
+@router.put("/{run_id}", dependencies=[Depends(require_seller)])
+def update_run(run_id: int, run: RunUpdate):
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE runs 
+            SET name = %s, run_type = %s 
+            WHERE id = %s 
+            RETURNING *;
+            """,
+            (run.name, run.run_type, run_id)
+        )
+        updated_run = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        if not updated_run:
+            raise HTTPException(status_code=404, detail="Run nicht gefunden")
+        return updated_run
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren des Runs: {str(e)}")
 
 # --- RUN LÖSCHEN (DELETE) - Nur ADMIN ---
 @router.delete("/{run_id}", dependencies=[Depends(require_admin)])
