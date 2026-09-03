@@ -2,7 +2,8 @@ import os
 import jwt
 from fastapi import APIRouter, HTTPException, Depends, Header, status
 from pydantic import BaseModel
-from app.db.database import get_connection, release_connection
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 router = APIRouter()
 
@@ -60,7 +61,7 @@ def create_participant(
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
         
     try:
-        conn = get_connection()
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO participants (name, discord_id) VALUES (%s, %s) RETURNING *;",
@@ -69,7 +70,7 @@ def create_participant(
         new_participant = cur.fetchone()
         conn.commit()
         cur.close()
-        release_connection(conn)
+        conn.close()
         return new_participant
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern: {str(e)}")
@@ -83,12 +84,12 @@ def get_participants(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
         
     try:
-        conn = get_connection()
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         cur.execute("SELECT * FROM participants ORDER BY id ASC;")
         participants = cur.fetchall()
         cur.close()
-        release_connection(conn)
+        conn.close()
         return participants
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden: {str(e)}")
@@ -106,7 +107,7 @@ def update_participant(
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
     try:
-        conn = get_connection()
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
 
         # Prüfen, ob der Teilnehmer existiert
@@ -114,7 +115,7 @@ def update_participant(
         existing = cur.fetchone()
         if not existing:
             cur.close()
-            release_connection(conn)
+            conn.close()
             raise HTTPException(status_code=404, detail="Teilnehmer nicht gefunden")
 
         # Update durchführen
@@ -130,7 +131,7 @@ def update_participant(
         updated_participant = cur.fetchone()
         conn.commit()
         cur.close()
-        release_connection(conn)
+        conn.close()
 
         return updated_participant
     except HTTPException:

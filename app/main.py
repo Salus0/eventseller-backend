@@ -1,7 +1,6 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.db.database import get_connection, release_connection
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -31,7 +30,7 @@ def force_init_db():
         return {"status": "Fehler", "details": "DATABASE_URL Umgebungsvariable fehlt!"}
         
     try:
-        conn = get_connection()
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         
         cur.execute("""
@@ -78,7 +77,7 @@ def force_init_db():
         
         conn.commit()
         cur.close()
-        release_connection(conn)
+        conn.close()
         return {"status": "Erfolg", "message": "Alle Tabellen wurden erfolgreich in PostgreSQL angelegt!"}
     except Exception as e:
         return {"status": "Fehler", "details": str(e)}
