@@ -395,8 +395,8 @@ def get_run_participants(run_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Teilnehmer: {str(e)}")
 
-# --- AUSZAHLUNGS-STATUS ÄNDERN (PUT) - Nur ADMIN ---
-@router.put("/{run_id}/participants/{participant_id}/payout", dependencies=[Depends(require_admin)])
+# --- AUSZAHLUNGS-STATUS ÄNDERN (PUT) - Mindestens SELLER   ---
+@router.put("/{run_id}/participants/{participant_id}/payout", dependencies=[Depends(require_seller)])
 def update_payout_status(run_id: int, participant_id: int, status: PayoutStatusUpdate):
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
