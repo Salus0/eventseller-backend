@@ -2,8 +2,7 @@ import os
 import jwt
 from fastapi import APIRouter, HTTPException, Depends, Header, status
 from pydantic import BaseModel
-import psycopg2
-from psycopg2.extras import RealDictCursor
+from app.db.database import get_connection, release_connection
 
 router = APIRouter()
 
@@ -67,7 +66,7 @@ def create_or_update_item(
         img_url = f"/items/{item.item_id}.png"
 
     try:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        conn = get_connection()
         cur = conn.cursor()
         
         cur.execute(
@@ -83,7 +82,7 @@ def create_or_update_item(
         saved_item = cur.fetchone()
         conn.commit()
         cur.close()
-        conn.close()
+        release_connection(conn)
         return saved_item
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern des Items: {str(e)}")
@@ -97,7 +96,7 @@ def get_items(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
     try:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        conn = get_connection()
         cur = conn.cursor()
         
         query = """
@@ -122,7 +121,7 @@ def get_items(current_user: dict = Depends(get_current_user)):
         cur.execute(query)
         items = cur.fetchall()
         cur.close()
-        conn.close()
+        release_connection(conn)
         return items
     except Exception as e:
         print(f"CRITICAL ERROR IN GET /items: {str(e)}")
@@ -140,7 +139,7 @@ def get_item_history(
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
     try:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        conn = get_connection()
         cur = conn.cursor()
         
         query = """
@@ -159,7 +158,7 @@ def get_item_history(
         cur.execute(query, (item_id, item_id))
         history = cur.fetchall()
         cur.close()
-        conn.close()
+        release_connection(conn)
         return history
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Historie: {str(e)}")
@@ -181,14 +180,14 @@ def update_item(
         img_url = f"/items/{item.item_id}.png"
 
     try:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-        cur = conn.cursor()
+        conn = get_connection()
+        cur = conn.cursor().cursor()
 
         cur.execute("SELECT * FROM items WHERE id = %s;", (id,))
         existing = cur.fetchone()
         if not existing:
             cur.close()
-            conn.close()
+            release_connection(conn)
             raise HTTPException(status_code=404, detail="Item nicht gefunden")
 
         cur.execute(
@@ -203,7 +202,7 @@ def update_item(
         updated_item = cur.fetchone()
         conn.commit()
         cur.close()
-        conn.close()
+        release_connection(conn)
 
         return updated_item
     except HTTPException:
