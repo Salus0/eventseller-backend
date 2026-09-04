@@ -39,6 +39,16 @@ def get_current_admin_user(current_user: dict = Depends(get_current_user)):
         )
     return current_user
 
+def get_current_seller_or_admin_user(current_user: dict = Depends(get_current_user)):
+    """Stellt sicher, dass der angemeldete Nutzer mindestens Seller oder Admin ist."""
+    user_role = current_user.get("role")
+    if user_role not in ["seller", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Keine Berechtigung! Nur Seller und Admins dürfen diese Aktion ausführen."
+        )
+    return current_user
+
 
 # --- SCHEMA FÜR PARTICIPANTS ---
 class ParticipantCreate(BaseModel):
@@ -50,13 +60,13 @@ class ParticipantUpdate(BaseModel):
     discord_id: str | None = None
 
 
-# --- TEILNEHMER ANLEGEN (POST) - Nur für Admins ---
+# --- TEILNEHMER ANLEGEN (POST) - Für Admins UND Seller ---
 @router.post("/")
 def create_participant(
     participant: ParticipantCreate,
-    admin_user: dict = Depends(get_current_admin_user)
+    current_user: dict = Depends(get_current_seller_or_admin_user)
 ):
-    """Erstellt einen neuen Teilnehmer in der Datenbank (Nur Admins)"""
+    """Erstellt einen neuen Teilnehmer in der Datenbank (Admins & Seller)"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
         
