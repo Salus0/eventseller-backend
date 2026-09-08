@@ -455,3 +455,4 @@ def get_run_summary(run_id: int):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler bei der Berechnung: {str(e)}")
+
