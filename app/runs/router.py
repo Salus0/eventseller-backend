@@ -12,6 +12,70 @@ router = APIRouter()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# --- RUN STATUS AKTUALISIEREN ---
+def update_run_status(cur, run_id: int):
+    """
+    Berechnet den aktuellen Status eines Runs und speichert ihn in runs.status.
+
+    Status:
+    - Offen: keine Items im Run
+    - On Sale: nicht alle Items verkauft
+    - Payout: alle Items verkauft, aber nicht alle Teilnehmer ausgezahlt
+    - Close: alle Items verkauft und alle Teilnehmer ausgezahlt
+    """
+    cur.execute(
+        """
+        SELECT
+            COALESCE(
+                (SELECT SUM(amount) FROM run_drops WHERE run_id = %s),
+                0
+            ) AS total_items,
+            COALESCE(
+                (SELECT SUM(quantity) FROM sales WHERE run_id = %s),
+                0
+            ) AS sold_items,
+            (
+                SELECT COUNT(*)
+                FROM run_participants
+                WHERE run_id = %s
+            ) AS total_participants,
+            (
+                SELECT COUNT(*)
+                FROM run_participants
+                WHERE run_id = %s AND is_paid = TRUE
+            ) AS paid_participants;
+        """,
+        (run_id, run_id, run_id, run_id)
+    )
+
+    data = cur.fetchone()
+
+    total_items = data["total_items"]
+    sold_items = data["sold_items"]
+    total_participants = data["total_participants"]
+    paid_participants = data["paid_participants"]
+
+    if total_items == 0:
+        new_status = "Offen"
+    elif sold_items < total_items:
+        new_status = "On Sale"
+    elif total_participants > 0 and paid_participants == total_participants:
+        new_status = "Close"
+    else:
+        new_status = "Payout"
+
+    cur.execute(
+        """
+        UPDATE runs
+        SET status = %s
+        WHERE id = %s;
+        """,
+        (new_status, run_id)
+    )
+
+    return new_status
+
+
 # --- SCHEMAS ---
 class RunCreate(BaseModel):
     name: str
@@ -84,7 +148,7 @@ def get_runs():
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        cur.execute("SELECT * FROM runs ORDER BY id DESC;")
+        cur.execute("SELECT * FROM runs WHERE status <> %s OR status IS NULL ORDER BY id DESC;", ("Close",))
         runs = cur.fetchall()
         cur.close()
         conn.close()
@@ -155,6 +219,8 @@ def update_run_participants(run_id: int, participants: List[ParticipantUpdate]):
                 """,
                 (run_id, p.participant_id, p.class_name)
             )
+
+        update_run_status(cur, run_id)
         conn.commit()
         cur.close()
         conn.close()
@@ -188,6 +254,8 @@ def update_run_items(run_id: int, items: List[ItemUpdate]):
                 """,
                 (run_id, item_id, item.quantity)
             )
+
+        update_run_status(cur, run_id)
         conn.commit()
         cur.close()
         conn.close()
@@ -255,6 +323,8 @@ def add_sale_to_run(run_id: int, sale: SaleCreate):
             (run_id, item_db_id, sale.quantity, final_price, sale.is_shop)
         )
         new_sale = cur.fetchone()
+
+        update_run_status(cur, run_id)
         conn.commit()
         cur.close()
         conn.close()
@@ -300,7 +370,7 @@ def update_sale(sale_id: int, sale: SaleUpdate):
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
 
-        cur.execute("SELECT id FROM sales WHERE id = %s;", (sale_id,))
+        cur.execute("SELECT id, run_id FROM sales WHERE id = %s;", (sale_id,))
         existing = cur.fetchone()
         if not existing:
             cur.close()
@@ -317,6 +387,8 @@ def update_sale(sale_id: int, sale: SaleUpdate):
             (sale.quantity, final_price, sale.is_shop, sale_id)
         )
         updated_sale = cur.fetchone()
+
+        update_run_status(cur, existing["run_id"])
         conn.commit()
         cur.close()
         conn.close()
@@ -335,13 +407,20 @@ def delete_sale(sale_id: int):
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        cur.execute("DELETE FROM sales WHERE id = %s RETURNING *;", (sale_id,))
+        cur.execute(
+            "DELETE FROM sales WHERE id = %s RETURNING *;",
+            (sale_id,)
+        )
         deleted_sale = cur.fetchone()
+        if not deleted_sale:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Verkauf nicht gefunden")
+
+        update_run_status(cur, deleted_sale["run_id"])
         conn.commit()
         cur.close()
         conn.close()
-        if not deleted_sale:
-            raise HTTPException(status_code=404, detail="Verkauf nicht gefunden")
         return {"message": "Verkauf erfolgreich entfernt"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Löschen: {str(e)}")
@@ -359,6 +438,8 @@ def add_participant_to_run(run_id: int, entry: RunParticipantAdd):
             (run_id, entry.participant_id)
         )
         res = cur.fetchone()
+
+        update_run_status(cur, run_id)
         conn.commit()
         cur.close()
         conn.close()
@@ -413,11 +494,15 @@ def update_payout_status(run_id: int, participant_id: int, status: PayoutStatusU
             (status.is_paid, run_id, participant_id)
         )
         updated_entry = cur.fetchone()
+        if not updated_entry:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+
+        update_run_status(cur, run_id)
         conn.commit()
         cur.close()
         conn.close()
-        if not updated_entry:
-            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
         return updated_entry
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren des Payouts: {str(e)}")
