@@ -148,7 +148,7 @@ def get_runs():
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        cur.execute("SELECT * FROM runs WHERE LOWER(status) <> 'close' OR status IS NULL ORDER BY id DESC;")
+        cur.execute("SELECT * FROM runs ORDER BY id DESC;")
         runs = cur.fetchall()
         cur.close()
         conn.close()
