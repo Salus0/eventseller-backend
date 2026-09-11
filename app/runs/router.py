@@ -21,7 +21,7 @@ def update_run_status(cur, run_id: int):
     - Offen: keine Items im Run
     - On Sale: nicht alle Items verkauft
     - Payout: alle Items verkauft, aber nicht alle Teilnehmer ausgezahlt
-    - Close: alle Items verkauft und alle Teilnehmer ausgezahlt
+    - close: alle Items verkauft und alle Teilnehmer ausgezahlt
     """
     cur.execute(
         """
@@ -60,7 +60,7 @@ def update_run_status(cur, run_id: int):
     elif sold_items < total_items:
         new_status = "On Sale"
     elif total_participants > 0 and paid_participants == total_participants:
-        new_status = "Close"
+        new_status = "close"
     else:
         new_status = "Payout"
 
@@ -148,7 +148,7 @@ def get_runs():
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        cur.execute("SELECT * FROM runs WHERE status <> %s OR status IS NULL ORDER BY id DESC;", ("Close",))
+        cur.execute("SELECT * FROM runs WHERE status <> %s OR status IS NULL ORDER BY id DESC;", ("close",))
         runs = cur.fetchall()
         cur.close()
         conn.close()
