@@ -76,8 +76,8 @@ def create_participant(
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO participants (name, discord_id) VALUES (%s, %s) RETURNING *;",
-            (participant.name, participant.discord_id)
+            "INSERT INTO participants (name, discord_id, role) VALUES (%s, %s, %s) RETURNING *;",
+            (participant.name, participant.discord_id, participant.role or "user")
         )
         new_participant = cur.fetchone()
         conn.commit()
@@ -134,11 +134,11 @@ def update_participant(
         cur.execute(
             """
             UPDATE participants 
-            SET name = %s, discord_id = %s 
+            SET name = %s, discord_id = %s, role = %s
             WHERE id = %s 
             RETURNING *;
             """,
-            (participant.name, participant.discord_id, participant_id)
+            (participant.name, participant.discord_id, participant.role or "user", participant_id)
         )
         updated_participant = cur.fetchone()
         conn.commit()
