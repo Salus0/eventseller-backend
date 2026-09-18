@@ -54,10 +54,12 @@ def get_current_seller_or_admin_user(current_user: dict = Depends(get_current_us
 class ParticipantCreate(BaseModel):
     name: str
     discord_id: str | None = None
+    role: str | None = "user"
 
 class ParticipantUpdate(BaseModel):
     name: str
     discord_id: str | None = None
+    role: str | None = "user"
 
 
 # --- TEILNEHMER ANLEGEN (POST) - Für Admins UND Seller ---
