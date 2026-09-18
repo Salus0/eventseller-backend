@@ -80,9 +80,11 @@ def update_run_status(cur, run_id: int):
 class RunCreate(BaseModel):
     name: str
     created_at: Optional[str] = None  # z.B. "2026-07-24 20:15:00"
+    seller: Optional[int] = None      # ID des Verkäufers (participants.id)
 
 class RunUpdate(BaseModel):
     name: str
+    seller: Optional[int] = None      # ID des Verkäufers
 
 class RunStatusUpdate(BaseModel):
     status: str
@@ -112,6 +114,7 @@ class SaleUpdate(BaseModel):
     actual_price: int
     is_shop: bool = False
 
+
 # --- RUN ERSTELLEN (POST) - Mindestens SELLER ---
 @router.post("/", dependencies=[Depends(require_seller)])
 def create_run(run: RunCreate):
@@ -120,25 +123,26 @@ def create_run(run: RunCreate):
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        
+
         if run.created_at:
             cur.execute(
-                "INSERT INTO runs (name, created_at) VALUES (%s, %s) RETURNING *;",
-                (run.name, run.created_at)
+                "INSERT INTO runs (name, created_at, seller) VALUES (%s, %s, %s) RETURNING *;",
+                (run.name, run.created_at, run.seller)
             )
         else:
             cur.execute(
-                "INSERT INTO runs (name) VALUES (%s) RETURNING *;",
-                (run.name,)
+                "INSERT INTO runs (name, seller) VALUES (%s, %s) RETURNING *;",
+                (run.name, run.seller)
             )
-            
+
         new_run = cur.fetchone()
         conn.commit()
         cur.close()
         conn.close()
         return new_run
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Fehler beim Erstellen des Runs: {str(e)}")
+
 
 # --- ALLE RUNS ABFRAGEN (GET) - Mindestens MEMBER ---
 @router.get("/", dependencies=[Depends(require_member)])
@@ -148,13 +152,24 @@ def get_runs():
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        cur.execute("SELECT * FROM runs ORDER BY id DESC;")
+        # Verknüpfung mit der participants-Tabelle, um den Verkäufernamen direkt mitzugeben
+        cur.execute(
+            """
+            SELECT
+                r.*,
+                p.name AS seller_name
+            FROM runs r
+            LEFT JOIN participants p ON r.seller = p.id
+            ORDER BY r.id DESC;
+            """
+        )
         runs = cur.fetchall()
         cur.close()
         conn.close()
         return runs
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
+
 
 # --- RUN BEARBEITEN (PUT) - Mindestens SELLER ---
 @router.put("/{run_id}", dependencies=[Depends(require_seller)])
@@ -166,12 +181,12 @@ def update_run(run_id: int, run: RunUpdate):
         cur = conn.cursor()
         cur.execute(
             """
-            UPDATE runs 
-            SET name = %s 
-            WHERE id = %s 
+            UPDATE runs
+            SET name = %s, seller = %s
+            WHERE id = %s
             RETURNING *;
             """,
-            (run.name, run_id)
+            (run.name, run.seller, run_id)
         )
         updated_run = cur.fetchone()
         conn.commit()
@@ -182,6 +197,7 @@ def update_run(run_id: int, run: RunUpdate):
         return updated_run
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren des Runs: {str(e)}")
+
 
 # --- RUN LÖSCHEN (DELETE) - Nur ADMIN ---
 @router.delete("/{run_id}", dependencies=[Depends(require_admin)])
@@ -201,6 +217,7 @@ def delete_run(run_id: int):
         return {"message": f"Run '{deleted_run['name']}' erfolgreich gelöscht"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Löschen: {str(e)}")
+
 
 # --- BATCH TEILNEHMER SPEICHERN (PUT) - Mindestens SELLER ---
 @router.put("/{run_id}/participants", dependencies=[Depends(require_seller)])
@@ -227,6 +244,7 @@ def update_run_participants(run_id: int, participants: List[ParticipantUpdate]):
         return {"message": "Teilnehmer erfolgreich gespeichert"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern der Teilnehmer: {str(e)}")
+
 
 # --- BATCH ITEMS SPEICHERN (PUT) - Mindestens SELLER ---
 @router.put("/{run_id}/items", dependencies=[Depends(require_seller)])
@@ -263,6 +281,7 @@ def update_run_items(run_id: int, items: List[ItemUpdate]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern der Items: {str(e)}")
 
+
 # --- ITEMS/DROPS ABFRAGEN (GET) - Mindestens MEMBER ---
 @router.get("/{run_id}/items", dependencies=[Depends(require_member)])
 def get_run_items(run_id: int):
@@ -273,7 +292,7 @@ def get_run_items(run_id: int):
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT 
+            SELECT
                 rd.item_id,
                 rd.amount as quantity,
                 i.name as item_name
@@ -290,6 +309,7 @@ def get_run_items(run_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Items: {str(e)}")
 
+
 # --- VERKAUF HINZUFÜGEN (POST) - Mindestens SELLER ---
 @router.post("/{run_id}/sales", dependencies=[Depends(require_seller)])
 def add_sale_to_run(run_id: int, sale: SaleCreate):
@@ -304,7 +324,7 @@ def add_sale_to_run(run_id: int, sale: SaleCreate):
 
         cur.execute("SELECT id FROM items WHERE ro_item_id = %s OR id = %s LIMIT 1;", (sale.item_id, sale.item_id))
         item_row = cur.fetchone()
-        
+
         if not item_row:
             cur.execute(
                 "INSERT INTO items (name, ro_item_id) VALUES (%s, %s) RETURNING id;",
@@ -332,6 +352,7 @@ def add_sale_to_run(run_id: int, sale: SaleCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern des Verkaufs: {str(e)}")
 
+
 # --- VERKÄUFE ABFRAGEN (GET) - Mindestens MEMBER ---
 @router.get("/{run_id}/sales", dependencies=[Depends(require_member)])
 def get_run_sales(run_id: int):
@@ -357,6 +378,7 @@ def get_run_sales(run_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler: {str(e)}")
 
+
 # --- VERKAUF BEARBEITEN (PUT) - Mindestens SELLER ---
 @router.put("/sales/{sale_id}", dependencies=[Depends(require_seller)])
 def update_sale(sale_id: int, sale: SaleUpdate):
@@ -379,9 +401,9 @@ def update_sale(sale_id: int, sale: SaleUpdate):
 
         cur.execute(
             """
-            UPDATE sales 
-            SET quantity = %s, actual_price = %s, is_shop = %s 
-            WHERE id = %s 
+            UPDATE sales
+            SET quantity = %s, actual_price = %s, is_shop = %s
+            WHERE id = %s
             RETURNING *;
             """,
             (sale.quantity, final_price, sale.is_shop, sale_id)
@@ -398,6 +420,7 @@ def update_sale(sale_id: int, sale: SaleUpdate):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren des Verkaufs: {str(e)}")
+
 
 # --- VERKAUF LÖSCHEN (DELETE) - Mindestens SELLER ---
 @router.delete("/sales/{sale_id}", dependencies=[Depends(require_seller)])
@@ -425,6 +448,7 @@ def delete_sale(sale_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Löschen: {str(e)}")
 
+
 # --- TEILNEHMER HINZUFÜGEN (POST) - Mindestens SELLER ---
 @router.post("/{run_id}/participants", dependencies=[Depends(require_seller)])
 def add_participant_to_run(run_id: int, entry: RunParticipantAdd):
@@ -447,6 +471,7 @@ def add_participant_to_run(run_id: int, entry: RunParticipantAdd):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Hinzufügen: {str(e)}")
 
+
 # --- TEILNEHMER ABFRAGEN (GET) - Mindestens MEMBER ---
 @router.get("/{run_id}/participants", dependencies=[Depends(require_member)])
 def get_run_participants(run_id: int):
@@ -457,9 +482,9 @@ def get_run_participants(run_id: int):
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT 
-                rp.participant_id, 
-                COALESCE(p.name, 'Teilnehmer #' || rp.participant_id) as name, 
+            SELECT
+                rp.participant_id,
+                COALESCE(p.name, 'Teilnehmer #' || rp.participant_id) as name,
                 p.discord_id,
                 COALESCE(rp.class_name, 'Unbekannt') as class_name,
                 COALESCE(rp.is_paid, FALSE) as is_paid
@@ -476,7 +501,8 @@ def get_run_participants(run_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Teilnehmer: {str(e)}")
 
-# --- AUSZAHLUNGS-STATUS ÄNDERN (PUT) - Mindestens SELLER   ---
+
+# --- AUSZAHLUNGS-STATUS ÄNDERN (PUT) - Mindestens SELLER ---
 @router.put("/{run_id}/participants/{participant_id}/payout", dependencies=[Depends(require_seller)])
 def update_payout_status(run_id: int, participant_id: int, status: PayoutStatusUpdate):
     if not DATABASE_URL:
@@ -507,6 +533,7 @@ def update_payout_status(run_id: int, participant_id: int, status: PayoutStatusU
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren des Payouts: {str(e)}")
 
+
 # --- ZENY-SPLIT BERECHNEN (GET) - Mindestens MEMBER ---
 @router.get("/{run_id}/summary", dependencies=[Depends(require_member)])
 def get_run_summary(run_id: int):
@@ -515,21 +542,21 @@ def get_run_summary(run_id: int):
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        
+
         cur.execute("SELECT COALESCE(SUM(quantity * actual_price), 0) as total_zeny FROM sales WHERE run_id = %s;", (run_id,))
         total_zeny = cur.fetchone()["total_zeny"]
-        
+
         cur.execute("SELECT COUNT(*) as count FROM run_participants WHERE run_id = %s;", (run_id,))
         participant_count = cur.fetchone()["count"]
-        
+
         cur.execute("SELECT COUNT(*) as paid_count FROM run_participants WHERE run_id = %s AND is_paid = TRUE;", (run_id,))
         paid_count = cur.fetchone()["paid_count"]
-        
+
         payout_per_player = int(total_zeny / participant_count) if participant_count > 0 else 0
-        
+
         cur.close()
         conn.close()
-        
+
         return {
             "run_id": run_id,
             "total_zeny": total_zeny,
