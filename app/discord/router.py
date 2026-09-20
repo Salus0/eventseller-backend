@@ -25,8 +25,19 @@ def fetch_run_details(run_id: int):
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
 
-        # 1. Run-Basisdaten holen
-        cur.execute("SELECT * FROM runs WHERE id = %s;", (run_id,))
+        # 1. Run-Basisdaten & Verkäufer-Details holen
+        cur.execute(
+            """
+            SELECT 
+                r.*,
+                p.name as seller_name,
+                p.discord_id as seller_discord_id
+            FROM runs r
+            LEFT JOIN participants p ON r.seller = p.id
+            WHERE r.id = %s;
+            """, 
+            (run_id,)
+        )
         run_data = cur.fetchone()
 
         if not run_data:
@@ -95,7 +106,15 @@ async def post_run_to_discord(run_id: int):
     payout_per_player = data["payout_per_player"]
     participants = data["participants"]
 
-    # 2. Teilnehmer-Liste formatieren (inkl. Discord Mention wenn discord_id vorhanden ist)
+    # 2. Verkäufer-Zeile formatieren
+    if run.get("seller_discord_id"):
+        seller_str = f"<@{run['seller_discord_id']}>"
+    elif run.get("seller_name"):
+        seller_str = f"@{run['seller_name']}"
+    else:
+        seller_str = "Nicht angegeben"
+
+    # 3. Teilnehmer-Liste formatieren
     if participants:
         participant_lines = []
         for p in participants:
@@ -117,7 +136,7 @@ async def post_run_to_discord(run_id: int):
     frontend_url = os.getenv("FRONTEND_URL", "https://yggdrasil-eventseller.up.railway.app")
     run_link = f"{frontend_url}/runs?open={run_id}"
 
-    # 3. Discord Embed payload aufbauen
+    # 4. Discord Embed payload aufbauen
     payload = {
         "username": "Yggdrasil Event-Seller",
         "embeds": [
@@ -127,6 +146,7 @@ async def post_run_to_discord(run_id: int):
                 "description": (
                     f"**Gesamteinnahmen:** {formatted_total} Zeny\n"
                     f"**Split für jeden:** {formatted_payout} Zeny\n\n"
+                    f"**Verkäufer:** {seller_str}\n\n"
                     f"**Teilnehmer ({len(participants)}):**\n"
                     f"{participants_text}\n\n"
                     f"🔗 **Direkt-Link:** [{run_name}]({run_link})"
@@ -138,7 +158,7 @@ async def post_run_to_discord(run_id: int):
         ]
     }
 
-    # 4. Request an Discord senden
+    # 5. Request an Discord senden
     async with httpx.AsyncClient() as client:
         response = await client.post(DISCORD_WEBHOOK_URL, json=payload)
         
