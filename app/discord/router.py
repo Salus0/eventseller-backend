@@ -129,7 +129,7 @@ async def post_run_to_discord(run_id: int):
                     f"**Split für jeden:** {formatted_payout} Zeny\n\n"
                     f"**Teilnehmer ({len(participants)}):**\n"
                     f"{participants_text}\n\n"
-                    f"🔗 **Direkt-Link:** [Zum Run: {run_name}]({run_link})"
+                    f"🔗 **Direkt-Link:** [{run_name}]({run_link})"
                 ),
                 "footer": {
                     "text": f"Yggdrasil Event-Seller"
