@@ -99,7 +99,6 @@ async def post_run_to_discord(run_id: int):
     if participants:
         participant_lines = []
         for p in participants:
-            # Falls discord_id vorhanden ist, benutze <@ID>, damit Discord den User markiert
             user_str = f"<@{p['discord_id']}>" if p.get("discord_id") else f"@{p['name']}"
             class_str = f"({p['class_name']})" if p.get("class_name") and p["class_name"] != "Unbekannt" else ""
             participant_lines.append(f"• {user_str} {class_str}".strip())
@@ -111,8 +110,11 @@ async def post_run_to_discord(run_id: int):
     formatted_total = f"{total_zeny:,}".replace(",", ".")
     formatted_payout = f"{payout_per_player:,}".replace(",", ".")
 
-    # Web-App URL zum Run
-    frontend_url = os.getenv("FRONTEND_URL", "https://eventseller-frontend.vercel.app/")
+    # Run Name & Frontend Link
+    run_name = run.get('name') or f"Run #{run_id}"
+    embed_title = f"Run Abrechnung: {run_name}"
+    
+    frontend_url = os.getenv("FRONTEND_URL", "https://yggdrasil-eventseller.up.railway.app")
     run_link = f"{frontend_url}/runs?open={run_id}"
 
     # 3. Discord Embed payload aufbauen
@@ -120,19 +122,17 @@ async def post_run_to_discord(run_id: int):
         "username": "Yggdrasil Event-Seller",
         "embeds": [
             {
-                "color": 5093762,  # Yggdrasil Grün (Hex: #4DB982)
+                "title": embed_title,
+                "color": 5093762,  # Yggdrasil-Grün (Hex: #4DB982)
                 "description": (
-                    "```yaml\n"
-                    "Es wurde alles verkauft !\n"  # Goldene/Gelbe Schrift im Codeblock
-                    "```\n"
                     f"**Gesamteinnahmen:** {formatted_total} Zeny\n"
                     f"**Split für jeden:** {formatted_payout} Zeny\n\n"
                     f"**Teilnehmer ({len(participants)}):**\n"
                     f"{participants_text}\n\n"
-                    f"🔗 **Direkt-Link:** [Zum Run #{run_id}]({run_link})"
+                    f"🔗 **Direkt-Link:** [Zum Run: {run_name}]({run_link})"
                 ),
                 "footer": {
-                    "text": f"Yggdrasil Event-Seller • Link: {run_link}"
+                    "text": f"Yggdrasil Event-Seller"
                 }
             }
         ]
