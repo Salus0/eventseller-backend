@@ -100,7 +100,7 @@ async def post_run_to_discord(run_id: int):
         participant_lines = []
         for p in participants:
             # Falls discord_id vorhanden ist, benutze <@ID>, damit Discord den User markiert
-            user_str = f"<@{p['discord_id']}>" if p.get("discord_id") else p["name"]
+            user_str = f"<@{p['discord_id']}>" if p.get("discord_id") else f"@{p['name']}"
             class_str = f"({p['class_name']})" if p.get("class_name") and p["class_name"] != "Unbekannt" else ""
             participant_lines.append(f"• {user_str} {class_str}".strip())
         participants_text = "\n".join(participant_lines)
@@ -111,35 +111,28 @@ async def post_run_to_discord(run_id: int):
     formatted_total = f"{total_zeny:,}".replace(",", ".")
     formatted_payout = f"{payout_per_player:,}".replace(",", ".")
 
-    # 3. Discord Embed payload aufbauen
-    embed_title = f"⚔️ Run Abrechnung: {run.get('name', f'Run #{run_id}')}"
-    run_type = run.get('run_type') or run.get('event_type') or 'Standard Run'
+    # Web-App URL zum Run
+    frontend_url = os.getenv("FRONTEND_URL", "https://eventseller-frontend.vercel.app/")
+    run_link = f"{frontend_url}/runs?open={run_id}"
 
+    # 3. Discord Embed payload aufbauen
     payload = {
         "username": "Yggdrasil Event-Seller",
         "embeds": [
             {
-                "title": embed_title,
-                "color": 3066993,  # Schönes Discord Green / Teal
-                "fields": [
-                    {
-                        "name": "Gesamt Zeny",
-                        "value": f"**{formatted_total} Zeny**",
-                        "inline": True
-                    },
-                    {
-                        "name": "Split pro Spieler",
-                        "value": f"**{formatted_payout} Zeny**",
-                        "inline": True
-                    },
-                    {
-                        "name": f"Teilnehmer ({len(participants)})",
-                        "value": participants_text,
-                        "inline": False
-                    }
-                ],
+                "color": 5093762,  # Yggdrasil Grün (Hex: #4DB982)
+                "description": (
+                    "```yaml\n"
+                    "Es wurde alles verkauft !\n"  # Goldene/Gelbe Schrift im Codeblock
+                    "```\n"
+                    f"**Gesamteinnahmen:** {formatted_total} Zeny\n"
+                    f"**Split für jeden:** {formatted_payout} Zeny\n\n"
+                    f"**Teilnehmer ({len(participants)}):**\n"
+                    f"{participants_text}\n\n"
+                    f"🔗 **Direkt-Link:** [Zum Run #{run_id}]({run_link})"
+                ),
                 "footer": {
-                    "text": f"Yggdrasil Event-Seller • Run ID: {run_id}"
+                    "text": f"Yggdrasil Event-Seller • Link: {run_link}"
                 }
             }
         ]
