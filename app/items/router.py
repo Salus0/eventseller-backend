@@ -156,7 +156,7 @@ def get_item_history(
             WHERE s.item_id = %s
             ORDER BY s.sold_at DESC NULLS LAST, s.id DESC;
         """
-        cur.execute(query, (item_id, item_id))
+        cur.execute(query, (item_id,))
         history = cur.fetchall()
         cur.close()
         conn.close()
