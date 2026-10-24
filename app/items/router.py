@@ -153,7 +153,7 @@ def get_item_history(
                 s.sold_at
             FROM sales s
             JOIN runs r ON s.run_id = r.id
-            WHERE s.item_id = %s OR s.item_id = (SELECT id FROM items WHERE ro_item_id = %s LIMIT 1)
+            WHERE s.item_id = %s
             ORDER BY s.sold_at DESC NULLS LAST, s.id DESC;
         """
         cur.execute(query, (item_id, item_id))
