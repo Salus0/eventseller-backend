@@ -51,6 +51,26 @@ def get_current_seller_or_admin_user(current_user: dict = Depends(get_current_us
     return current_user
 
 
+# --- HILFSFUNKTION FÜR BERECHTIGUNG (OWNER ODER ADMIN) ---
+def check_participant_owner_or_admin(participant_id: int, current_user: dict, conn) -> bool:
+    """Prüft, ob der User ein Admin ist oder ob ihm der Teilnehmer anhand der Discord-ID gehört."""
+    if current_user.get("role") == "admin":
+        return True
+    
+    cur = conn.cursor()
+    cur.execute("SELECT discord_id FROM participants WHERE id = %s;", (participant_id,))
+    row = cur.fetchone()
+    cur.close()
+    
+    if not row:
+        return False
+        
+    participant_discord_id = row.get("discord_id")
+    user_discord_id = current_user.get("discord_id") or current_user.get("discordId") or current_user.get("id")
+
+    return bool(participant_discord_id and user_discord_id and str(participant_discord_id) == str(user_discord_id))
+
+
 # --- SCHEMAS ---
 class ParticipantCreate(BaseModel):
     name: str
@@ -202,19 +222,28 @@ def get_participant_characters(participant_id: int, current_user: dict = Depends
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Charaktere: {str(e)}")
 
 
-# --- NEUEN CHARAKTER HINZUFÜGEN (POST) ---
+# --- NEUEN CHARAKTER HINZUFÜGEN (POST) - Für Besitzer oder Admin ---
 @router.post("/{participant_id}/characters")
 def add_character(
     participant_id: int,
     char: CharacterCreate,
     current_user: dict = Depends(get_current_user)
 ):
-    """Fügt einem Teilnehmer einen neuen Charakter hinzu"""
+    """Fügt einem Teilnehmer einen neuen Charakter hinzu (Erlaubt für Admins & den jeweiligen Nutzer selbst)"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        
+        # Berechtigung prüfen (Admin oder Inhaber via Discord-ID)
+        if not check_participant_owner_or_admin(participant_id, current_user, conn):
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Keine Berechtigung! Du kannst nur für deine eigenen Charaktere Einträge vornehmen."
+            )
+
         cur = conn.cursor()
 
         # Prüfen ob Teilnehmer existiert
@@ -243,19 +272,28 @@ def add_character(
         raise HTTPException(status_code=500, detail=f"Fehler beim Speichern des Charakters: {str(e)}")
 
 
-# --- CHARAKTER LÖSCHEN (DELETE) ---
+# --- CHARAKTER LÖSCHEN (DELETE) - Für Besitzer oder Admin ---
 @router.delete("/{participant_id}/characters/{char_id}")
 def delete_character(
     participant_id: int,
     char_id: int,
-    admin_user: dict = Depends(get_current_admin_user)
+    current_user: dict = Depends(get_current_user)
 ):
-    """Löscht einen Charakter (Nur Admins)"""
+    """Löscht einen Charakter (Erlaubt für Admins & den jeweiligen Nutzer selbst)"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        
+        # Berechtigung prüfen (Admin oder Inhaber via Discord-ID)
+        if not check_participant_owner_or_admin(participant_id, current_user, conn):
+            conn.close()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Keine Berechtigung! Du kannst diesen Charakter nicht löschen."
+            )
+
         cur = conn.cursor()
         cur.execute("DELETE FROM characters WHERE id = %s AND participant_id = %s RETURNING id;", (char_id, participant_id))
         deleted = cur.fetchone()
