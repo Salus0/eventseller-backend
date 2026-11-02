@@ -186,14 +186,14 @@ def update_participant(
 # --- CHARAKTERE EINES TEILNEHMERS ABRUFEN (GET) ---
 @router.get("/{participant_id}/characters")
 def get_participant_characters(participant_id: int, current_user: dict = Depends(get_current_user)):
-    """Ruft alle Charaktere eines bestimmten Teilnehmers ab"""
+    """Ruft alle Charaktere eines bestimmten Teilnehmers ab, sortiert nach Account-Nummer"""
     if not DATABASE_URL:
         raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
 
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
-        cur.execute("SELECT * FROM characters WHERE participant_id = %s ORDER BY id ASC;", (participant_id,))
+        cur.execute("SELECT * FROM characters WHERE participant_id = %s ORDER BY account_number ASC, id ASC;", (participant_id,))
         characters = cur.fetchall()
         cur.close()
         conn.close()
