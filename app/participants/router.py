@@ -2,6 +2,7 @@ import os
 import jwt
 from fastapi import APIRouter, HTTPException, Depends, Header, status
 from pydantic import BaseModel
+from typing import Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -50,7 +51,7 @@ def get_current_seller_or_admin_user(current_user: dict = Depends(get_current_us
     return current_user
 
 
-# --- SCHEMA FÜR PARTICIPANTS ---
+# --- SCHEMAS ---
 class ParticipantCreate(BaseModel):
     name: str
     discord_id: str | None = None
@@ -60,6 +61,12 @@ class ParticipantUpdate(BaseModel):
     name: str
     discord_id: str | None = None
     role: str | None = "user"
+
+class CharacterCreate(BaseModel):
+    account_number: str
+    class_name: str
+    build_name: str
+    name: Optional[str] = None
 
 
 # --- TEILNEHMER ANLEGEN (POST) - Für Admins UND Seller ---
@@ -107,6 +114,30 @@ def get_participants(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Fehler beim Laden: {str(e)}")
 
 
+# --- EINZELNEN TEILNEHMER ABFRAGEN (GET) - Für die Detailseite ---
+@router.get("/{participant_id}")
+def get_participant(participant_id: int, current_user: dict = Depends(get_current_user)):
+    """Ruft einen einzelnen Teilnehmer anhand seiner ID ab"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM participants WHERE id = %s;", (participant_id,))
+        participant = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if not participant:
+            raise HTTPException(status_code=404, detail="Teilnehmer nicht gefunden")
+        return participant
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Laden: {str(e)}")
+
+
 # --- TEILNEHMER BEARBEITEN (PUT) - Nur für Admins ---
 @router.put("/{participant_id}")
 def update_participant(
@@ -150,3 +181,130 @@ def update_participant(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren: {str(e)}")
+
+
+# --- CHARAKTERE EINES TEILNEHMERS ABRUFEN (GET) ---
+@router.get("/{participant_id}/characters")
+def get_participant_characters(participant_id: int, current_user: dict = Depends(get_current_user)):
+    """Ruft alle Charaktere eines bestimmten Teilnehmers ab"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM characters WHERE participant_id = %s ORDER BY id ASC;", (participant_id,))
+        characters = cur.fetchall()
+        cur.close()
+        conn.close()
+        return characters
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Charaktere: {str(e)}")
+
+
+# --- NEUEN CHARAKTER HINZUFÜGEN (POST) ---
+@router.post("/{participant_id}/characters")
+def add_character(
+    participant_id: int,
+    char: CharacterCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Fügt einem Teilnehmer einen neuen Charakter hinzu"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+
+        # Prüfen ob Teilnehmer existiert
+        cur.execute("SELECT id FROM participants WHERE id = %s;", (participant_id,))
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Teilnehmer nicht gefunden")
+
+        cur.execute(
+            """
+            INSERT INTO characters (participant_id, account_number, class_name, build_name, name) 
+            VALUES (%s, %s, %s, %s, %s) 
+            RETURNING *;
+            """,
+            (participant_id, char.account_number, char.class_name, char.build_name, char.name)
+        )
+        new_char = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        return new_char
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Speichern des Charakters: {str(e)}")
+
+
+# --- CHARAKTER LÖSCHEN (DELETE) ---
+@router.delete("/{participant_id}/characters/{char_id}")
+def delete_character(
+    participant_id: int,
+    char_id: int,
+    admin_user: dict = Depends(get_current_admin_user)
+):
+    """Löscht einen Charakter (Nur Admins)"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM characters WHERE id = %s AND participant_id = %s RETURNING id;", (char_id, participant_id))
+        deleted = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Charakter nicht gefunden")
+
+        return {"message": "Charakter erfolgreich gelöscht"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Löschen: {str(e)}")
+
+
+# --- AUSZAHLUNGEN FÜR DIE STATISTIK / HISTORIE (GET) ---
+@router.get("/{participant_id}/payouts")
+def get_participant_payouts(participant_id: int, current_user: dict = Depends(get_current_user)):
+    """Ruft alle ausgezahlten Runs des Teilnehmers ab (für die Historie & Statistik)"""
+    if not DATABASE_URL:
+        raise HTTPException(status_code=500, detail="DATABASE_URL ist nicht gesetzt!")
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT rp.run_id, r.name AS run_name, r.created_at, rp.payout_amount, rp.is_paid
+            FROM run_participants rp
+            JOIN runs r ON rp.run_id = r.id
+            WHERE rp.participant_id = %s AND rp.is_paid = TRUE;
+            """,
+            (participant_id,)
+        )
+        results = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        payout_list = []
+        for row in results:
+            payout_list.append({
+                "run_id": row["run_id"],
+                "run_name": row["run_name"],
+                "date": row["created_at"].strftime("%d.%m.%Y") if row["created_at"] else None,
+                "payout_amount": row["payout_amount"],
+                "is_paid": row["is_paid"]
+            })
+        return payout_list
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fehler beim Laden der Auszahlungen: {str(e)}")

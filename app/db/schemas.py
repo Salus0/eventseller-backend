@@ -18,5 +18,16 @@ class ParticipantUpdate(ParticipantBase):
 class ParticipantResponse(ParticipantBase):
     id: int
 
+# SCHEMA FÜR CHARAKTERE
+class CharacterCreate(BaseModel):
+    account_number: str
+    class_name: str
+    build_name: str
+    name: Optional[str] = None
+
+class CharacterResponse(CharacterCreate):
+    id: int
+    participant_id: int
+
     class Config:
         from_attributes = True  # Erlaubt Pydantic das Auslesen von SQLAlchemy-Modellen
