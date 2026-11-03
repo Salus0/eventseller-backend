@@ -76,11 +76,13 @@ class ParticipantCreate(BaseModel):
     name: str
     discord_id: str | None = None
     role: str | None = "user"
+    avatar: str | None = None
 
 class ParticipantUpdate(BaseModel):
     name: str
     discord_id: str | None = None
     role: str | None = "user"
+    avatar: str | None = None
 
 class CharacterCreate(BaseModel):
     account_number: str
@@ -103,8 +105,8 @@ def create_participant(
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO participants (name, discord_id, role) VALUES (%s, %s, %s) RETURNING *;",
-            (participant.name, participant.discord_id, participant.role or "user")
+            "INSERT INTO participants (name, discord_id, role, avatar) VALUES (%s, %s, %s, %s) RETURNING *;",
+            (participant.name, participant.discord_id, participant.role or "user", participant.avatar)
         )
         new_participant = cur.fetchone()
         conn.commit()
@@ -181,15 +183,15 @@ def update_participant(
             conn.close()
             raise HTTPException(status_code=404, detail="Teilnehmer nicht gefunden")
 
-        # Update durchführen
+        # Update durchführen inkl. Avatar
         cur.execute(
             """
             UPDATE participants 
-            SET name = %s, discord_id = %s, role = %s
+            SET name = %s, discord_id = %s, role = %s, avatar = %s
             WHERE id = %s 
             RETURNING *;
             """,
-            (participant.name, participant.discord_id, participant.role or "user", participant_id)
+            (participant.name, participant.discord_id, participant.role or "user", participant.avatar, participant_id)
         )
         updated_participant = cur.fetchone()
         conn.commit()
